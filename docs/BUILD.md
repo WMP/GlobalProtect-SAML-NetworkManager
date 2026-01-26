@@ -72,15 +72,11 @@ dpkg-buildpackage -us -uc -b
 
 ```bash
 # For GNOME
-sudo dpkg -i output/ubuntu24.04/network-manager-gpclient_*.deb
-sudo dpkg -i output/ubuntu24.04/network-manager-gpclient-gnome_*.deb
-sudo apt-get install -f
-
-# For KDE Plasma
-sudo dpkg -i output/ubuntu24.04/network-manager-gpclient_*.deb
-sudo dpkg -i output/ubuntu24.04/network-manager-gpclient-plasma_*.deb
+sudo dpkg -i output/ubuntu24.04/*.deb
 sudo apt-get install -f
 ```
+
+Select appropriate packages for your desktop (gnome or plasma).
 
 ### For development (without packaging):
 

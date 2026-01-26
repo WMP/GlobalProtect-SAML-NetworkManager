@@ -100,19 +100,15 @@ dpkg-buildpackage -us -uc -b
 
 ## Installation
 
-### For GNOME users:
+Download packages from [GitHub Releases](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/releases) for your Ubuntu version.
 
 ```bash
-sudo dpkg -i network-manager-gpclient_*_ubuntu24.04.deb \
-              network-manager-gpclient-gnome_*_ubuntu24.04.deb
+# For GNOME/GTK desktops
+sudo dpkg -i network-manager-gpclient_*.deb network-manager-gpclient-gnome_*.deb
 sudo apt-get install -f
-```
 
-### For KDE Plasma users:
-
-```bash
-sudo dpkg -i network-manager-gpclient_*_ubuntu24.04.deb \
-              network-manager-gpclient-plasma_*_ubuntu24.04.deb
+# For KDE Plasma
+sudo dpkg -i network-manager-gpclient_*.deb network-manager-gpclient-plasma_*.deb
 sudo apt-get install -f
 ```
 
