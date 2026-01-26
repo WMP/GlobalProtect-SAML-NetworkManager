@@ -1,6 +1,12 @@
 # NetworkManager GlobalProtect VPN Plugin
 
 NetworkManager VPN plugin for GlobalProtect (Palo Alto Networks) with SAML/SSO authentication support.
+<img width="511" height="355" alt="image" src="https://github.com/user-attachments/assets/adb4a229-ae91-4415-8450-4b106ebeb475" />
+<img width="597" height="363" alt="image" src="https://github.com/user-attachments/assets/7613a682-068c-4992-92d7-80139969c351" />
+
+<img width="405" height="475" alt="image" src="https://github.com/user-attachments/assets/db5196a5-942e-4692-856b-e87fa647b2c7" />
+
+<img width="451" height="600" alt="image" src="https://github.com/user-attachments/assets/29c54314-33f3-4b07-9378-a8e4c462409c" />
 
 ## Features
 
