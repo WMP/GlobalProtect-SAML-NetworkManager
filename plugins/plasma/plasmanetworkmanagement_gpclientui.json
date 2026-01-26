@@ -1,0 +1,21 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "",
+                "Name": "GlobalProtect VPN Plugin"
+            }
+        ],
+        "Description": "GlobalProtect VPN client for NetworkManager",
+        "Icon": "network-vpn",
+        "Id": "plasmanetworkmanagement_gpclientui",
+        "License": "LGPL",
+        "Name": "GlobalProtect",
+        "ServiceTypes": [
+            "PlasmaNetworkManagement/VpnUiPlugin"
+        ],
+        "Version": "1.0",
+        "Website": ""
+    },
+    "X-NetworkManager-Services": "org.freedesktop.NetworkManager.gpclient"
+}

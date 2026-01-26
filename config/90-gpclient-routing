@@ -1,0 +1,119 @@
+#!/bin/sh
+# IMPORTANT: This script is sourced by vpnc-script which uses /bin/sh
+# Therefore we MUST use POSIX-compatible shell syntax only (no bash-isms)
+
+# NM flags propagated by nm-gpclient-service.py
+ignore_all="${GPCLIENT_NM_IGNORE_AUTO_ROUTES:-0}"
+never_def="${GPCLIENT_NM_NEVER_DEFAULT:-0}"
+custom_dns_domains="${GPCLIENT_CUSTOM_DNS_DOMAINS:-}"
+
+fields="ADDR MASK MASKLEN PROTOCOL SPORT DPORT"
+
+# Helper: unset all indexed vars for a given prefix and count var name
+# Note: Uses eval because POSIX sh doesn't support namerefs
+unset_indexed() {
+  _prefix="$1"          # e.g. CISCO_SPLIT_INC
+  _count_var="$2"       # e.g. CISCO_SPLIT_INC
+
+  # Validate count_var name (alphanumeric and underscore only)
+  case "$_count_var" in
+    *[!A-Za-z0-9_]*) return 1 ;;
+  esac
+
+  eval "_n=\${$_count_var:-0}"
+  case "$_n" in ''|*[!0-9]*) _n=0 ;; esac
+
+  _i=0
+  while [ "$_i" -lt "$_n" ]; do
+    for _f in $fields; do
+      unset "${_prefix}_${_i}_${_f}"
+    done
+    _i=$((_i+1))
+  done
+
+  eval "${_count_var}=0"
+  export "$_count_var"
+}
+
+# Helper: remove default-route-like entry (MASK=0.0.0.0) and compact indices
+compact_split_inc_remove_default() {
+  _old=${CISCO_SPLIT_INC:-0}
+  case "$_old" in ''|*[!0-9]*) _old=0 ;; esac
+
+  _new=0
+  _i=0
+  while [ "$_i" -lt "$_old" ]; do
+    eval "_mask=\${CISCO_SPLIT_INC_${_i}_MASK-}"
+
+    # treat 0.0.0.0 mask as invalid/default
+    if [ "$_mask" = "0.0.0.0" ]; then
+      for _f in $fields; do
+        unset "CISCO_SPLIT_INC_${_i}_${_f}"
+      done
+      _i=$((_i+1))
+      continue
+    fi
+
+    # move i -> new
+    if [ "$_new" -ne "$_i" ]; then
+      for _f in $fields; do
+        eval "_val=\${CISCO_SPLIT_INC_${_i}_${_f}-}"
+
+        if [ -n "$_val" ]; then
+          eval "CISCO_SPLIT_INC_${_new}_${_f}=\"\$_val\""
+          eval "export CISCO_SPLIT_INC_${_new}_${_f}"
+        else
+          unset "CISCO_SPLIT_INC_${_new}_${_f}"
+        fi
+      done
+      for _f in $fields; do
+        unset "CISCO_SPLIT_INC_${_i}_${_f}"
+      done
+    fi
+
+    _new=$((_new+1))
+    _i=$((_i+1))
+  done
+
+  # clear tail
+  _j=$_new
+  while [ "$_j" -lt "$_old" ]; do
+    for _f in $fields; do
+      unset "CISCO_SPLIT_INC_${_j}_${_f}"
+    done
+    _j=$((_j+1))
+  done
+
+  CISCO_SPLIT_INC=$_new
+  export CISCO_SPLIT_INC
+}
+
+# Add custom DNS domains if specified
+if [ -n "$custom_dns_domains" ]; then
+  echo "vpnc hook: Adding custom DNS domains: $custom_dns_domains" >&2
+
+  # Append custom domains to CISCO_DEF_DOMAIN (space-separated)
+  if [ -n "$CISCO_DEF_DOMAIN" ]; then
+    CISCO_DEF_DOMAIN="$CISCO_DEF_DOMAIN $custom_dns_domains"
+  else
+    CISCO_DEF_DOMAIN="$custom_dns_domains"
+  fi
+  export CISCO_DEF_DOMAIN
+fi
+
+# Policy:
+if [ "$ignore_all" = "1" ]; then
+  echo "vpnc hook: NM ignore-auto-routes=1 -> disabling ALL vpnc routing" >&2
+
+  # Disable split include/exclude routing entirely
+  unset_indexed CISCO_SPLIT_INC CISCO_SPLIT_INC
+  unset_indexed CISCO_SPLIT_EXC CISCO_SPLIT_EXC
+
+  # (optional) for IPv6 split:
+  # unset_indexed CISCO_IPV6_SPLIT_INC CISCO_IPV6_SPLIT_INC
+  # unset_indexed CISCO_IPV6_SPLIT_EXC CISCO_IPV6_SPLIT_EXC
+
+elif [ "$never_def" = "1" ]; then
+  echo "vpnc hook: NM never-default=1 -> removing default route from split-inc" >&2
+  compact_split_inc_remove_default
+fi

@@ -1,0 +1,93 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	# Build GNOME plugins
+	$(MAKE) all
+
+	# Build Plasma plugin
+	mkdir -p plugins/plasma/build
+	cd plugins/plasma/build && cmake .. && $(MAKE)
+
+	# Build Rust binaries (gpclient, gpauth, and gpservice)
+	# Cargo will reuse compiled dependencies from target cache volume
+	# Only local crates (gpauth, gpclient, gpservice, gpapi, common, openconnect) will be recompiled
+	@echo "Building gpclient, gpauth, and gpservice (reusing cached dependencies)..."
+	cd external/GlobalProtect-openconnect && cargo build --release --bin gpclient --bin gpauth --bin gpservice
+
+override_dh_auto_install:
+	# Install backend plugin (base package - needed for nmcli)
+	install -D -m 644 libnm-vpn-plugin-gpclient.so \
+		$(CURDIR)/debian/network-manager-gpclient/usr/lib/x86_64-linux-gnu/NetworkManager/libnm-vpn-plugin-gpclient.so
+
+	# Install GNOME GUI plugins (editor libraries)
+	install -D -m 644 libnm-vpn-plugin-gpclient-editor.so \
+		$(CURDIR)/debian/network-manager-gpclient-gnome/usr/lib/x86_64-linux-gnu/NetworkManager/libnm-vpn-plugin-gpclient-editor.so
+	# Install GTK4 plugin only if it was built (available on Ubuntu 24.04+)
+	if [ -f libnm-gtk4-vpn-plugin-gpclient-editor.so ]; then \
+		install -D -m 644 libnm-gtk4-vpn-plugin-gpclient-editor.so \
+			$(CURDIR)/debian/network-manager-gpclient-gnome/usr/lib/x86_64-linux-gnu/NetworkManager/libnm-gtk4-vpn-plugin-gpclient-editor.so; \
+	fi
+
+	# Create symlink for libnm-gpclient-properties (GNOME)
+	mkdir -p $(CURDIR)/debian/network-manager-gpclient-gnome/usr/lib
+	ln -sf /usr/lib/x86_64-linux-gnu/NetworkManager/libnm-vpn-plugin-gpclient-editor.so \
+		$(CURDIR)/debian/network-manager-gpclient-gnome/usr/lib/libnm-gpclient-properties
+
+	# Install Plasma plugin
+	install -D -m 644 plugins/plasma/build/plasmanetworkmanagement_gpclientui.so \
+		$(CURDIR)/debian/network-manager-gpclient-plasma/usr/lib/x86_64-linux-gnu/qt5/plugins/plasma/network/vpn/plasmanetworkmanagement_gpclientui.so
+	install -D -m 644 plugins/plasma/plasmanetworkmanagement_gpclientui.json \
+		$(CURDIR)/debian/network-manager-gpclient-plasma/usr/lib/x86_64-linux-gnu/qt5/plugins/plasma/network/vpn/plasmanetworkmanagement_gpclientui.json
+	install -D -m 644 plugins/plasma/plasmanetworkmanagement_gpclientui.desktop \
+		$(CURDIR)/debian/network-manager-gpclient-plasma/usr/share/kservices5/plasmanetworkmanagement_gpclientui.desktop
+
+	# Install core service files (base package)
+	install -D -m 644 plugins/gnome/nm-gpclient-service.name \
+		$(CURDIR)/debian/network-manager-gpclient/usr/lib/NetworkManager/VPN/nm-gpclient-service.name
+	install -D -m 755 service/nm-gpclient-service.py \
+		$(CURDIR)/debian/network-manager-gpclient/usr/lib/NetworkManager/nm-gpclient-service
+	install -D -m 755 scripts/edge-wrapper.sh \
+		$(CURDIR)/debian/network-manager-gpclient/usr/libexec/gpclient/edge-wrapper
+
+	# Install systemd service file
+	install -D -m 644 config/nm-gpclient.service \
+		$(CURDIR)/debian/network-manager-gpclient/lib/systemd/system/nm-gpclient.service
+
+	# Install D-Bus service file for automatic activation
+	install -D -m 644 config/org.freedesktop.NetworkManager.gpclient.service \
+		$(CURDIR)/debian/network-manager-gpclient/usr/share/dbus-1/system-services/org.freedesktop.NetworkManager.gpclient.service
+
+	# Install D-Bus policy file
+	install -D -m 644 config/nm-gpclient.conf \
+		$(CURDIR)/debian/network-manager-gpclient/etc/dbus-1/system.d/nm-gpclient.conf
+
+	# Create compatibility symlink for old path
+	mkdir -p $(CURDIR)/debian/network-manager-gpclient/usr/libexec/NetworkManager
+	ln -sf /usr/lib/NetworkManager/nm-gpclient-service \
+		$(CURDIR)/debian/network-manager-gpclient/usr/libexec/NetworkManager/gpclient-nm-service
+
+	# Install Rust binaries (gpclient, gpauth, and gpservice)
+	install -D -m 755 external/GlobalProtect-openconnect/target/release/gpclient \
+		$(CURDIR)/debian/network-manager-gpclient/usr/bin/gpclient
+	install -D -m 755 external/GlobalProtect-openconnect/target/release/gpauth \
+		$(CURDIR)/debian/network-manager-gpclient/usr/bin/gpauth
+	install -D -m 755 external/GlobalProtect-openconnect/target/release/gpservice \
+		$(CURDIR)/debian/network-manager-gpclient/usr/bin/gpservice
+
+	# Install .desktop file for URL handler registration (globalprotectcallback://)
+	install -D -m 644 external/GlobalProtect-openconnect/packaging/files/usr/share/applications/gpgui.desktop \
+		$(CURDIR)/debian/network-manager-gpclient/usr/share/applications/gpgui.desktop
+
+	# Install vpnc hook for routing configuration
+	install -D -m 755 config/90-gpclient-routing \
+		$(CURDIR)/debian/network-manager-gpclient/etc/vpnc/connect.d/90-gpclient-routing
+
+
+override_dh_auto_clean:
+	$(MAKE) clean || true
+	rm -rf plugins/plasma/build debs

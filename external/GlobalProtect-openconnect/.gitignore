@@ -1,0 +1,16 @@
+.idea
+/target
+.pnpm-store
+.env
+.vendor
+*.tar.xz
+
+.cargo
+.build
+SNAPSHOT
+
+# Tauri generated files
+gen
+
+# Nix files
+result

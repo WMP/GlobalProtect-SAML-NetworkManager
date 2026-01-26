@@ -1,0 +1,48 @@
+# Git files
+.git
+.gitignore
+.gitmodules
+
+# Build artifacts
+*.o
+*.so
+*.a
+*.deb
+*.ddeb
+*.buildinfo
+*.changes
+
+# Output directory
+output/
+
+# Build logs
+build.log
+
+# Debian packaging temporary files
+debian/.debhelper/
+debian/network-manager-gpclient/
+debian/network-manager-gpclient-gnome/
+debian/network-manager-gpclient-plasma/
+debian/files
+debian/*.substvars
+debian/*.debhelper
+debian/tmp/
+
+# Plasma build directory
+plugins/plasma/build/
+
+# Rust build artifacts - exclude entire target directory
+# This makes COPY step fast but Rust compiles everything from scratch each time
+external/GlobalProtect-openconnect/target/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.bak
+*.orig

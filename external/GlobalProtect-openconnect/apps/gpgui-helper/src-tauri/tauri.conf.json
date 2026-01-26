@@ -1,0 +1,43 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build",
+    "devUrl": "http://localhost:1421",
+    "frontendDist": "../dist"
+  },
+  "identifier": "com.yuezk.gpgui-helper",
+  "productName": "gpgui-helper",
+  "app": {
+    "withGlobalTauri": false,
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "title": "GP Connect Helper",
+        "center": true,
+        "resizable": true,
+        "width": 500,
+        "height": 100,
+        "minWidth": 500,
+        "minHeight": 100,
+        "maxWidth": 500,
+        "maxHeight": 100,
+        "label": "main",
+        "decorations": false
+      }
+    ]
+  },
+  "bundle": {
+    "active": false,
+    "targets": "deb",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

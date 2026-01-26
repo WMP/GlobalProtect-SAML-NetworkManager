@@ -1,0 +1,76 @@
+# Build artifacts
+*.so
+*.o
+*.a
+*.lo
+*.la
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# GTK/GNOME build files
+libnm-vpn-plugin-gpclient.so
+libnm-vpn-plugin-gpclient-editor.so
+libnm-gtk4-vpn-plugin-gpclient-editor.so
+
+# Debian build
+debian/.debhelper/
+debian/network-manager-gpclient/
+debian/network-manager-gpclient-gnome/
+debian/network-manager-gpclient-plasma/
+debian/files
+debian/*.debhelper
+debian/*.substvars
+debian/*.log
+debian/debhelper-build-stamp
+*.deb
+*.ddeb
+*.changes
+*.buildinfo
+
+# Docker build output
+output/
+
+# Build directory
+build/
+
+# CMake/Plasma build
+plugins/plasma/build/
+plasma/build/
+plasma/*.so
+plasma/*.o
+plasma/*_autogen/
+plasma/moc_*
+plasma/ui_*.h
+
+# Editor files
+*~
+*.swp
+*.swo
+.*.swp
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.log
+
+# Built binaries from GlobalProtect-openconnect
+gpclient
+gpauth
+
+# Reference/downloaded source packages (not part of this project)
+network-manager-openconnect-gnome/
+
+# Debug/test logs
+prmarkie-logs/
+
+# GUI test artifacts (screenshots, logs)
+artifacts/
+
+# Claude Code
+.claude/

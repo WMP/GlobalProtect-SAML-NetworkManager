@@ -1,0 +1,3 @@
+plugins/plasma/build/plasmanetworkmanagement_gpclientui.so usr/lib/x86_64-linux-gnu/qt5/plugins/plasma/network/vpn/
+plugins/plasma/plasmanetworkmanagement_gpclientui.json usr/lib/x86_64-linux-gnu/qt5/plugins/plasma/network/vpn/
+plugins/plasma/plasmanetworkmanagement_gpclientui.desktop usr/share/kservices5/

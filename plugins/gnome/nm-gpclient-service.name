@@ -1,0 +1,10 @@
+[VPN Connection]
+name=GlobalProtect
+service=org.freedesktop.NetworkManager.gpclient
+program=/usr/lib/NetworkManager/nm-gpclient-service
+
+[libnm]
+plugin=libnm-vpn-plugin-gpclient.so
+
+[GNOME]
+properties=libnm-gpclient-properties

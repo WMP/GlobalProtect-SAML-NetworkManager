@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Service
+Icon=network-vpn
+ServiceTypes=PlasmaNetworkManagement/VpnUiPlugin
+X-KDE-Library=plasmanetworkmanagement_gpclientui
+X-NetworkManager-Services=org.freedesktop.NetworkManager.gpclient
+X-KDE-PluginInfo-Author=GlobalProtect VPN Plugin
+X-KDE-PluginInfo-Email=
+X-KDE-PluginInfo-Name=plasmanetworkmanagement_gpclientui
+X-KDE-PluginInfo-Version=1.0
+X-KDE-PluginInfo-Website=
+X-KDE-PluginInfo-License=LGPL
+X-KDE-PluginInfo-EnabledByDefault=true
+Name=GlobalProtect
+Comment=GlobalProtect VPN client for NetworkManager

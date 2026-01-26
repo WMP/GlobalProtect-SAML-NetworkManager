@@ -1,0 +1,71 @@
+FROM ubuntu:22.04
+
+LABEL maintainer="WMP"
+LABEL description="Build environment for network-manager-gpclient .deb package"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install build dependencies (GNOME + Plasma)
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    debhelper \
+    devscripts \
+    pkg-config \
+    libglib2.0-dev \
+    libnm-dev \
+    libgtk-3-dev \
+    libgtk-4-dev \
+    libnma-dev \
+    cmake \
+    extra-cmake-modules \
+    qtbase5-dev \
+    libkf5networkmanagerqt-dev \
+    libkf5i18n-dev \
+    libkf5service-dev \
+    libkf5widgetsaddons-dev \
+    plasma-nm \
+    curl \
+    libssl-dev \
+    libdbus-1-dev \
+    libopenconnect-dev \
+    libwebkit2gtk-4.1-dev \
+    fakeroot \
+    lintian \
+    python3-pip \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install python3-sdbus via pip (not available in Ubuntu 22.04)
+RUN pip3 install sdbus
+
+# Create build user (to avoid building as root)
+# Use /build/source as WORKDIR so that ".." points to /build (writable by builder)
+RUN useradd -m -s /bin/bash builder && \
+    mkdir -p /build/source /cargo-cache /target-cache && \
+    chown -R builder:builder /build /cargo-cache /target-cache
+
+# Switch to builder user to install Rust
+USER builder
+
+# Install Rust via rustup as builder user (we need Rust 1.85+ for GlobalProtect-openconnect v2.5.1)
+# This layer will be cached as long as Rust version doesn't change
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.85
+ENV PATH="/home/builder/.cargo/bin:${PATH}"
+
+# Switch back to root to set working directory
+USER root
+
+# Set working directory (use /build/source so ".." = /build is writable)
+WORKDIR /build/source
+
+# Switch to builder user for build
+USER builder
+
+# Set Cargo cache directory
+ENV CARGO_HOME=/cargo-cache
+
+# Copy source code (this layer invalidates when source changes)
+COPY --chown=builder:builder . /build/source/
+
+# Default command (can be overridden)
+CMD ["bash"]

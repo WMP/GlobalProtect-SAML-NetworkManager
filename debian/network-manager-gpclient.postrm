@@ -1,0 +1,30 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove|purge)
+        # Kill VPN service process if still running
+        if pgrep -f "gpclient.*service" >/dev/null 2>&1; then
+            echo "Stopping nm-gpclient-service..."
+            pkill -f "gpclient.*service" || true
+        fi
+
+        # Reload D-Bus configuration
+        if [ -x /usr/bin/dbus-send ]; then
+            dbus-send --system --type=method_call --dest=org.freedesktop.DBus \
+                /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig >/dev/null 2>&1 || true
+        fi
+        ;;
+
+    upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+
+    *)
+        echo "postrm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

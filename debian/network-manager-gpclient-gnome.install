@@ -1,0 +1,2 @@
+# All files are installed via debian/rules override_dh_auto_install
+# This file is kept for debhelper compatibility but is not used

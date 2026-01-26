@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+# Reload NetworkManager to pick up new VPN plugin
+if [ -x /usr/bin/systemctl ] && systemctl is-active --quiet NetworkManager; then
+    systemctl reload NetworkManager || true
+fi
+
+#DEBHELPER#
+
+exit 0

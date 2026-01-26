@@ -1,0 +1,9 @@
+network-manager-gpclient (1.0.0-1) unstable; urgency=medium
+
+  * Initial release.
+  * NetworkManager VPN plugin for GlobalProtect
+  * GTK3 editor for nm-connection-editor
+  * GTK4 editor for GNOME Settings
+  * Edge browser wrapper for SAML authentication
+
+ -- WMP <example@example.org>  Mon, 09 Dec 2024 19:00:00 +0100

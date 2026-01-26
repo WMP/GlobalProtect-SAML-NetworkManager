@@ -1,0 +1,99 @@
+name: Publish PPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish'
+        required: true
+      revision:
+        description: 'Package revision'
+        required: false
+        default: "1"
+      series:
+        description: 'Ubuntu series to publish'
+        type: "string"
+        required: false
+        default: ""
+      rust:
+        description: 'Rust version to use'
+        type: "string"
+        required: true
+        default: "1.85"
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check tag exists
+      uses: mukunku/tag-exists-action@v1.6.0
+      id: check-tag
+      with:
+        tag: ${{ inputs.tag }}
+    - name: Exit if tag does not exist
+      run: |
+        if [[ "${{ steps.check-tag.outputs.exists }}" == "false" ]]; then
+          echo "Tag ${{ inputs.tag }} does not exist"
+          exit 1
+        fi
+
+  publish-ppa:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: pnpm/action-setup@v4
+      with:
+        version: 9
+    - name: Prepare workspace
+      run: rm -rf publish-ppa && mkdir publish-ppa
+    - name: Download ${{ inputs.tag }} offline source code
+      env:
+        GH_TOKEN: ${{ secrets.GH_PAT }}
+      run: |
+        gh -R yuezk/GlobalProtect-openconnect \
+          release download ${{ inputs.tag }} \
+          --pattern '*.offline.tar.gz' \
+          --dir publish-ppa
+    - name: Patch the source code
+      run: |
+        cd publish-ppa
+
+        # Rename the source tarball without the offline suffix
+        mv -v *.tar.gz $(basename *.tar.gz .offline.tar.gz).tar.gz
+
+        # Extract the source tarball
+        tar -xzf *.tar.gz
+
+        # Prepare the debian directory with custom files
+        cd globalprotect-openconnect-*/
+
+        # Prepare the debian directory with custom files
+        mkdir -p .build/debian
+
+        cp -v packaging/deb/control.in .build/debian/control
+        cp -v packaging/deb/rules.in .build/debian/rules
+        cp -v packaging/deb/compat .build/debian/compat
+        cp -v packaging/deb/postrm .build/debian/postrm
+
+        sed -i "s/@OFFLINE@/1/g" .build/debian/rules
+        sed -i "s/@BUILD_GUI@/1/g" .build/debian/rules
+
+        # Update the control file with the correct Rust version
+        # sed -i "s/rust-[0-9.]\+-all/rust-${{ inputs.rust }}-all/g" .build/debian/control
+        # sed -i "s/rust-[0-9.]\+/rust-${{ inputs.rust }}/g" .build/debian/rules
+        sed -i "s/DISABLE_RUST_TOOLCHAIN = 0/DISABLE_RUST_TOOLCHAIN = 1/g" .build/debian/rules
+
+    - name: Publish to PPA
+      uses: yuezk/publish-ppa-package@gp
+      with:
+        repository: "yuezk/globalprotect-openconnect"
+        gpg_private_key: ${{ secrets.PPA_GPG_PRIVATE_KEY }}
+        gpg_passphrase: ${{ secrets.PPA_GPG_PASSPHRASE }}
+        tarball: publish-ppa/globalprotect-openconnect-*.tar.gz
+        debian_dir: publish-ppa/globalprotect-openconnect-*/.build/debian
+        deb_email: "k3vinyue@gmail.com"
+        deb_fullname: "Kevin Yue"
+        extra_ppa: "yuezk/globalprotect-openconnect"
+        # Ubuntu 18.04 and 20.04 are excluded because tauri2 no longer supports them
+        excluded_series: "bionic focal"
+        series: ${{ inputs.series }}
+        revision: ${{ inputs.revision }}

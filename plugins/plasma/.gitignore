@@ -1,0 +1,8 @@
+# Build directory
+build/
+*.so
+*.o
+*.a
+*_autogen/
+moc_*
+ui_*.h

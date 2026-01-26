@@ -1,0 +1,116 @@
+#!/bin/sh
+#
+# Copyright © 2021 Daniel Lenski
+#
+# This file is part of openconnect.
+#
+# This is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public License
+# as published by the Free Software Foundation; either version 2.1 of
+# the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>
+
+# This test uses LD_PRELOAD
+PRELOAD=1
+srcdir=${srcdir:-.}
+top_builddir=${top_builddir:-..}
+
+. `dirname $0`/common.sh
+
+FINGERPRINT="--servercert=pin-sha256:xp3scfzy3rO"
+CERT=$certdir/server-cert.pem
+KEY=$certdir/server-key.pem
+FAKE_TOKEN="--token-mode=totp --token-secret=ABCD"
+
+echo "Testing Juniper auth against fake server ..."
+
+OCSERV=${srcdir}/fake-juniper-server.py
+launch_simple_sr_server $ADDRESS 443 $CERT $KEY > /dev/null 2>&1
+PID=$!
+wait_server $PID
+
+SERVURL="https://$ADDRESS:443"
+CLIENT="$OPENCONNECT --protocol=nc $FINGERPRINT -u test --passwd-on-stdin -q"
+export LD_PRELOAD=libsocket_wrapper.so
+
+echo -n "frmLogin with username/password"
+( echo "test" | $CLIENT $SERVURL --cookieonly >/dev/null 2>&1) ||
+    fail $PID "Could not receive cookie from fake Juniper server"
+
+echo ok
+
+echo "Configuring fake server to present a choice of 3 realms."
+curl -sk $SERVURL/CONFIGURE -d realms=xyz,abc,def
+
+echo -n "frmLogin with username/password/authgroup"
+( echo "test" | $CLIENT $SERVURL --authgroup=abc --cookieonly >/dev/null 2>&1) ||
+    fail $PID "Could not receive cookie from fake Juniper server"
+
+echo ok
+
+echo "Configuring fake server to require token as 2nd password in default frmLogin form."
+curl -sk $SERVURL/CONFIGURE -d token_form=frmLogin
+
+echo -n "frmLogin with username/password/token-as-2nd-password"
+( echo "test" | $CLIENT $SERVURL $FAKE_TOKEN --cookieonly >/dev/null 2>&1) ||
+    fail $PID "Could not receive cookie from fake Juniper server"
+
+echo ok
+
+echo "Configuring fake server to require token in separate frmTotpToken form."
+curl -sk $SERVURL/CONFIGURE -d token_form=frmTotpToken
+
+echo -n "frmLogin with username/password → frmTotpToken"
+( echo "test" | $CLIENT $SERVURL $FAKE_TOKEN --cookieonly >/dev/null 2>&1) ||
+    fail $PID "Could not receive cookie from fake Juniper server"
+
+echo ok
+
+echo "Configuring fake server to require token in separate frmDefender, and confirmation form."
+curl -sk $SERVURL/CONFIGURE -d 'token_form=frmDefender&confirm=1'
+
+echo -n "frmLogin with username/password → frmDefender → frmConfirmation"
+( echo "test" | $CLIENT $SERVURL $FAKE_TOKEN --cookieonly >/dev/null 2>&1) ||
+    fail $PID "Could not receive cookie from fake Juniper server"
+
+echo ok
+
+echo "Configuring fake server to require token in separate frmNextToken."
+curl -sk $SERVURL/CONFIGURE -d token_form=frmNextToken
+
+echo -n "frmLogin with username/password → frmNextToken"
+( echo "test" | $CLIENT $SERVURL $FAKE_TOKEN --cookieonly >/dev/null 2>&1) ||
+    fail $PID "Could not receive cookie from fake Juniper server"
+
+ok
+
+echo "Configuring fake server to present confirmation form, and a choice of 3 roles."
+curl -sk $SERVURL/CONFIGURE -d 'confirm=1&roles=foo,bar,baz'
+
+# --authgroup will now fill in EITHER the role and/or the realm
+echo -n "frmLogin with username/password → frmConfirmation → frmSelectRoles"
+( echo "test" | $CLIENT $SERVURL --authgroup=bar --cookieonly >/dev/null 2>&1) ||
+    fail $PID "Could not receive cookie from fake Juniper server"
+
+echo ok
+
+echo "Resetting fake server to default configuration."
+curl -sk $SERVURL/CONFIGURE -d ''
+
+echo -n "frmLogin with username/password, then proceeding to tunnel stage... "
+echo "test" | $CLIENT $SERVURL >/dev/null 2>&1
+test $? = 2 || # what OpenConnect returns when server rejects cookie upon tunnel connection, as the fake server does
+    fail $PID "Something went wrong in fake Juniper server (other than the expected rejection of cookie)"
+
+echo ok
+
+cleanup
+
+exit 0

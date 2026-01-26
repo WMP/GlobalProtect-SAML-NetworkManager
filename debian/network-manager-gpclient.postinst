@@ -1,0 +1,48 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure|reconfigure)
+        # Reload D-Bus configuration to pick up new service files
+        if [ -x /usr/bin/dbus-send ]; then
+            dbus-send --system --type=method_call --dest=org.freedesktop.DBus \
+                /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig >/dev/null 2>&1 || true
+        fi
+
+        # Kill old VPN service process if running, so NetworkManager can start fresh one
+        if pidof -x nm-gpclient-service >/dev/null 2>&1; then
+            echo "Restarting nm-gpclient-service..."
+            pkill -x nm-gpclient-service || true
+        fi
+
+        # Also check for old process name
+        if pgrep -f "gpclient-nm-service" >/dev/null 2>&1; then
+            echo "Killing old gpclient-nm-service process..."
+            pkill -f "gpclient-nm-service" || true
+        fi
+
+        # Ensure systemd-resolved is enabled in /etc/nsswitch.conf for split DNS
+        if [ -f /etc/nsswitch.conf ]; then
+            if ! grep -q "^hosts:.*resolve" /etc/nsswitch.conf; then
+                echo "Configuring /etc/nsswitch.conf to use systemd-resolved..."
+                # Backup original file
+                cp /etc/nsswitch.conf /etc/nsswitch.conf.gpclient-backup
+                # Add resolve to hosts line if not present
+                sed -i 's/^hosts:\(.*\)files/hosts:\1resolve [!UNAVAIL=return] files/' /etc/nsswitch.conf || true
+                echo "Note: /etc/nsswitch.conf has been modified. Backup saved to /etc/nsswitch.conf.gpclient-backup"
+            fi
+        fi
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0
