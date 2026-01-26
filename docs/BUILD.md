@@ -70,13 +70,15 @@ dpkg-buildpackage -us -uc -b
 
 ### From built packages:
 
-```bash
-# For GNOME
-sudo dpkg -i output/ubuntu24.04/*.deb
-sudo apt-get install -f
-```
+Install two packages from `output/ubuntu24.04/` (or `ubuntu22.04`):
+1. **network-manager-gpclient** - core package (required)
+2. **network-manager-gpclient-gnome** - for GNOME/GTK desktops, or
+   **network-manager-gpclient-plasma** - for KDE Plasma
 
-Select appropriate packages for your desktop (gnome or plasma).
+```bash
+sudo dpkg -i <packages>.deb
+sudo apt-get install -f  # install dependencies
+```
 
 ### For development (without packaging):
 

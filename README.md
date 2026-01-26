@@ -14,12 +14,14 @@ NetworkManager VPN plugin for GlobalProtect (Palo Alto Networks) with SAML/SSO a
 
 Download `.deb` packages from [GitHub Releases](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/releases) for your Ubuntu version (22.04 or 24.04).
 
-```bash
-# Install core package + GUI package for your desktop
-sudo dpkg -i network-manager-gpclient_*.deb network-manager-gpclient-gnome_*.deb
-sudo apt-get install -f
+Install two packages:
+1. **network-manager-gpclient** - core package (required)
+2. **network-manager-gpclient-gnome** - for GNOME/GTK desktops, or
+   **network-manager-gpclient-plasma** - for KDE Plasma
 
-# For KDE Plasma use network-manager-gpclient-plasma_*.deb instead
+```bash
+sudo dpkg -i <downloaded-packages>.deb
+sudo apt-get install -f  # install dependencies
 ```
 
 ## Usage
