@@ -12,6 +12,7 @@ struct _NMGpclientEditor {
     GtkWidget *gateway_entry;
     GtkWidget *browser_combo;
     GtkWidget *dns_entry;
+    GtkWidget *hip_check;
 };
 
 static void nm_gpclient_editor_interface_init (NMVpnEditorInterface *iface);
@@ -42,6 +43,12 @@ browser_combo_changed_cb (GtkComboBox *combo, gpointer user_data)
     }
 
     g_free ((gchar *)text);
+    g_signal_emit_by_name (user_data, "changed");
+}
+
+static void
+check_toggled_cb (GtkCheckButton *check, gpointer user_data)
+{
     g_signal_emit_by_name (user_data, "changed");
 }
 
@@ -138,6 +145,26 @@ build_ui (NMGpclientEditor *self)
     g_signal_connect (self->dns_entry, "changed", G_CALLBACK (entry_changed_cb), self);
     gtk_grid_attach (GTK_GRID (grid), self->dns_entry, 1, row++, 1, 1);
 
+    /* HIP checkbox */
+    label = gtk_label_new ("HIP:");
+    gtk_widget_set_halign (label, GTK_ALIGN_START);
+    gtk_grid_attach (GTK_GRID (grid), label, 0, row, 1, 1);
+
+    self->hip_check = gtk_check_button_new_with_label ("Enable Host Integrity Protection (HIP)");
+    gtk_widget_set_tooltip_text (self->hip_check,
+        "Enable HIP (Host Integrity Protection) to send host information to the VPN gateway.\n"
+        "This is required by some organizations for security compliance.");
+    /* Default: enabled */
+    gboolean hip_enabled = TRUE;
+    if (s_vpn) {
+        value = nm_setting_vpn_get_data_item (s_vpn, "hip");
+        if (value && *value)
+            hip_enabled = (g_strcmp0(value, "true") == 0);
+    }
+    gtk_check_button_set_active (GTK_CHECK_BUTTON (self->hip_check), hip_enabled);
+    g_signal_connect (self->hip_check, "toggled", G_CALLBACK (check_toggled_cb), self);
+    gtk_grid_attach (GTK_GRID (grid), self->hip_check, 1, row++, 1, 1);
+
     return grid;
 }
 
@@ -193,6 +220,12 @@ update_connection (NMVpnEditor *editor,
         nm_setting_vpn_add_data_item (s_vpn, "dns", str);
     else
         nm_setting_vpn_remove_data_item (s_vpn, "dns");
+
+    /* Save HIP */
+    if (gtk_check_button_get_active (GTK_CHECK_BUTTON (self->hip_check)))
+        nm_setting_vpn_add_data_item (s_vpn, "hip", "true");
+    else
+        nm_setting_vpn_add_data_item (s_vpn, "hip", "false");
 
     return TRUE;
 }

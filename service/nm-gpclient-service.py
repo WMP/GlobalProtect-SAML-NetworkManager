@@ -68,6 +68,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self.dns_domains = []
         self.gateway = None
         self.browser = None
+        self.hip_enabled = True  # HIP enabled by default
         self._state = NM_VPN_SERVICE_STATE_INIT
 
         # Routing configuration
@@ -198,6 +199,11 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                 ]
                 logger.info(f"Custom DNS domains configured: {self.dns_domains}")
 
+            # Get HIP setting (default: enabled)
+            hip_str = data_dict.get("hip", "true")
+            self.hip_enabled = hip_str.lower() == "true"
+            logger.info(f"HIP enabled: {self.hip_enabled}")
+
             # Emit state change: preparing
             self.StateChanged.emit(NM_VPN_SERVICE_STATE_STARTING)
 
@@ -271,6 +277,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         # Clean up
         self.gpclient_process = None
         self.dns_servers = []
+        self.hip_enabled = True
         self.never_default = False
         self.custom_routes = []
 
@@ -434,12 +441,21 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             cmd = [
                 "/usr/bin/gpclient",
                 "connect",
-                "--browser",
-                self.browser,
-                "--gateway",
-                self.gateway,
-                self.gateway,
             ]
+
+            # Add --hip flag if enabled
+            if self.hip_enabled:
+                cmd.append("--hip")
+
+            cmd.extend(
+                [
+                    "--browser",
+                    self.browser,
+                    "--gateway",
+                    self.gateway,
+                    self.gateway,
+                ]
+            )
 
             logger.info(f"Spawning: {' '.join(cmd)}")
 

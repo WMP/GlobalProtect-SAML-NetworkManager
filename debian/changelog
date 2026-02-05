@@ -1,3 +1,12 @@
+network-manager-gpclient (1.1.0-1) unstable; urgency=medium
+
+  * Add HIP (Host Integrity Protection) checkbox to VPN configuration dialogs
+  * HIP enabled by default, adds --hip flag to gpclient command
+  * Support for Plasma, GTK4 (GNOME Settings), and GTK3 (nm-connection-editor)
+  * Update README with Ubuntu 22.04 pip3 install sdbus instruction
+
+ -- WMP <example@example.org>  Wed, 05 Feb 2025 12:00:00 +0100
+
 network-manager-gpclient (1.0.0-1) unstable; urgency=medium
 
   * Initial release.
