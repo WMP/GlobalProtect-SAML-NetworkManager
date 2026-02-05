@@ -59,9 +59,9 @@ plasma/ui_*.h
 *.tmp
 *.log
 
-# Built binaries from GlobalProtect-openconnect
-gpclient
-gpauth
+# Built binaries from GlobalProtect-openconnect (in root directory only)
+/gpclient
+/gpauth
 
 # Reference/downloaded source packages (not part of this project)
 network-manager-openconnect-gnome/

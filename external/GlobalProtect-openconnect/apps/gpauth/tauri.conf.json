@@ -1,0 +1,16 @@
+{
+  "$schema": "https://cdn.jsdelivr.net/gh/tauri-apps/tauri@tauri-v2.1.1/crates/tauri-cli/config.schema.json",
+  "build": {
+    "frontendDist": ["index.html"],
+    "beforeDevCommand": "",
+    "beforeBuildCommand": ""
+  },
+  "identifier": "com.yuezk.gpauth",
+  "productName": "gpauth",
+  "app": {
+    "withGlobalTauri": false,
+    "security": {
+      "csp": null
+    }
+  }
+}
