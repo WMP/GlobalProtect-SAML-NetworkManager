@@ -19,6 +19,12 @@ Install two packages:
 2. **network-manager-gpclient-gnome** - for GNOME/GTK desktops, or
    **network-manager-gpclient-plasma** - for KDE Plasma
 
+**Ubuntu 22.04 only:** Install python3-sdbus via pip before installing packages (not available in apt):
+```bash
+pip3 install sdbus
+```
+
+Then install the packages:
 ```bash
 sudo dpkg -i <downloaded-packages>.deb
 sudo apt-get install -f  # install dependencies

@@ -74,6 +74,26 @@ Override: Enter semicolon-separated DNS servers (e.g., 8.8.8.8;8.8.4.4) to use c
      </property>
     </widget>
    </item>
+   <item row="3" column="0">
+    <widget class="QLabel" name="hipLabel">
+     <property name="text">
+      <string>HIP:</string>
+     </property>
+    </widget>
+   </item>
+   <item row="3" column="1">
+    <widget class="QCheckBox" name="hipCheckBox">
+     <property name="text">
+      <string>Enable Host Integrity Protection (HIP)</string>
+     </property>
+     <property name="toolTip">
+      <string>Enable HIP (Host Integrity Protection) to send host information to the VPN gateway. This is required by some organizations for security compliance.</string>
+     </property>
+     <property name="checked">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
   </layout>
  </widget>
  <resources/>

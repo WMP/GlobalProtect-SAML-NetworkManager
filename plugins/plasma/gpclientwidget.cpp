@@ -7,6 +7,7 @@
 #include "ui_gpclientwidget.h"
 
 #include <NetworkManagerQt/Utils>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QFileInfo>
 #include <QLineEdit>
@@ -43,6 +44,7 @@ GpclientWidget::GpclientWidget(const NetworkManager::VpnSetting::Ptr &setting, Q
     connect(m_ui->gatewayLineEdit, &QLineEdit::textChanged, this, &GpclientWidget::settingChanged);
     connect(m_ui->browserComboBox, &QComboBox::currentTextChanged, this, &GpclientWidget::settingChanged);
     connect(m_ui->dnsLineEdit, &QLineEdit::textChanged, this, &GpclientWidget::settingChanged);
+    connect(m_ui->hipCheckBox, &QCheckBox::toggled, this, &GpclientWidget::settingChanged);
 
     auto update_valid = [this]() {
         Q_EMIT validChanged(isValid());
@@ -87,6 +89,10 @@ void GpclientWidget::loadConfig(const NetworkManager::Setting::Ptr &setting)
         if (data.contains(QLatin1String("dns"))) {
             m_ui->dnsLineEdit->setText(data.value(QLatin1String("dns")));
         }
+
+        // Load HIP (default: enabled)
+        QString hipValue = data.value(QLatin1String("hip"), QLatin1String("true"));
+        m_ui->hipCheckBox->setChecked(hipValue.toLower() == QLatin1String("true"));
     }
 }
 
@@ -112,6 +118,9 @@ QVariantMap GpclientWidget::setting() const
     if (!m_ui->dnsLineEdit->text().isEmpty()) {
         data.insert(QLatin1String("dns"), m_ui->dnsLineEdit->text());
     }
+
+    // Save HIP
+    data.insert(QLatin1String("hip"), m_ui->hipCheckBox->isChecked() ? QLatin1String("true") : QLatin1String("false"));
 
     setting.setData(data);
 

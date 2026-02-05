@@ -17,6 +17,7 @@ struct _NMGpclientEditor {
     GtkEntry *gateway_entry;
     GtkComboBoxText *browser_combo;
     GtkEntry *dns_entry;
+    GtkCheckButton *hip_check;
 };
 
 static void nm_gpclient_editor_interface_init (NMVpnEditorInterface *iface_class);
@@ -156,6 +157,26 @@ build_ui (NMGpclientEditor *self)
     g_signal_connect (G_OBJECT (self->dns_entry), "changed", G_CALLBACK (stuff_changed_cb), self);
     gtk_grid_attach (GTK_GRID (widget), GTK_WIDGET (self->dns_entry), 1, row++, 1, 1);
 
+    /* HIP */
+    label = gtk_label_new ("HIP:");
+    gtk_widget_set_halign (label, GTK_ALIGN_START);
+    gtk_grid_attach (GTK_GRID (widget), label, 0, row, 1, 1);
+
+    self->hip_check = GTK_CHECK_BUTTON (gtk_check_button_new_with_label ("Enable Host Integrity Protection (HIP)"));
+    gtk_widget_set_tooltip_text (GTK_WIDGET (self->hip_check),
+        "Enable HIP (Host Integrity Protection) to send host information to the VPN gateway.\n"
+        "This is required by some organizations for security compliance.");
+    /* Default: enabled */
+    gboolean hip_enabled = TRUE;
+    if (s_vpn) {
+        value = nm_setting_vpn_get_data_item (s_vpn, "hip");
+        if (value && *value)
+            hip_enabled = (g_strcmp0(value, "true") == 0);
+    }
+    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (self->hip_check), hip_enabled);
+    g_signal_connect (G_OBJECT (self->hip_check), "toggled", G_CALLBACK (stuff_changed_cb), self);
+    gtk_grid_attach (GTK_GRID (widget), GTK_WIDGET (self->hip_check), 1, row++, 1, 1);
+
     gtk_widget_show_all (widget);
 
     return widget;
@@ -210,6 +231,13 @@ update_connection (NMVpnEditor *iface,
         str = gtk_entry_get_text (self->dns_entry);
         if (str && strlen (str))
             nm_setting_vpn_add_data_item (s_vpn, "dns", str);
+    }
+
+    if (self->hip_check) {
+        if (gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (self->hip_check)))
+            nm_setting_vpn_add_data_item (s_vpn, "hip", "true");
+        else
+            nm_setting_vpn_add_data_item (s_vpn, "hip", "false");
     }
 
     return TRUE;
@@ -269,6 +297,7 @@ nm_gpclient_editor_init (NMGpclientEditor *self)
     self->gateway_entry = NULL;
     self->browser_combo = NULL;
     self->dns_entry = NULL;
+    self->hip_check = NULL;
 }
 
 NMGpclientEditor *
