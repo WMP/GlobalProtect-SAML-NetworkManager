@@ -35,6 +35,9 @@ debian/debhelper-build-stamp
 # Docker build output
 output/
 
+# Local temp dir used for sandbox runtime/logs
+tmp/
+
 # Build directory
 build/
 

@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-### Ubuntu 22.04 / 24.04
+### Ubuntu 22.04 / 24.04 (Plasma 5 / Qt5 / KF5)
 
 Install build dependencies:
 ```bash
@@ -18,6 +18,26 @@ sudo apt-get install -y \
 ```
 
 Note: `libnma-gtk4-dev` may not be available on Ubuntu 22.04 - the build will skip GTK4 editor in that case.
+
+### Ubuntu 26.04 (Plasma 6 / Qt6 / KF6)
+
+```bash
+sudo apt-get install -y \
+    build-essential debhelper pkg-config \
+    libglib2.0-dev libnm-dev \
+    libgtk-3-dev libgtk-4-dev libnma-dev libnma-gtk4-dev \
+    cmake extra-cmake-modules \
+    qt6-base-dev qt6-base-dev-tools \
+    libkf6networkmanagerqt-dev libkf6i18n-dev \
+    libkf6service-dev libkf6widgetsaddons-dev libkf6coreaddons-dev \
+    plasma-nm \
+    curl libssl-dev libdbus-1-dev \
+    libopenconnect-dev libwebkit2gtk-4.1-dev python3-sdbus
+```
+
+The Plasma plugin's CMakeLists auto-detects Qt6/KF6 if both Qt5 and Qt6 are
+installed. To force a specific major version pass `-DQT_MAJOR_VERSION=6` (or 5)
+to cmake.
 
 ### Rust Installation
 
@@ -39,11 +59,12 @@ source $HOME/.cargo/env
 ./build-all.sh
 
 # Build for specific version
+./build-all.sh 26.04
 ./build-all.sh 24.04
 ./build-all.sh 22.04
 ```
 
-Packages will be in `output/ubuntu24.04/` or `output/ubuntu22.04/`.
+Packages will be in `output/ubuntu26.04/`, `output/ubuntu24.04/` or `output/ubuntu22.04/`.
 
 ### Build individual components (for development):
 

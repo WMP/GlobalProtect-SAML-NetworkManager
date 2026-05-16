@@ -14,7 +14,8 @@ on:
         options:
           - "22.04"
           - "24.04"
-          - "both"
+          - "26.04"
+          - "all"
 
 permissions:
   contents: write
@@ -24,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        ubuntu: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.ubuntu_version == 'both' && fromJSON('["22.04", "24.04"]') || fromJSON(format('["{0}"]', github.event.inputs.ubuntu_version))) || fromJSON('["22.04", "24.04"]') }}
+        ubuntu: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.ubuntu_version == 'all' && fromJSON('["22.04", "24.04", "26.04"]') || fromJSON(format('["{0}"]', github.event.inputs.ubuntu_version))) || fromJSON('["22.04", "24.04", "26.04"]') }}
 
     steps:
       - name: Checkout code

@@ -114,12 +114,16 @@ sudo apt-get install -f  # install dependencies
 
 ## Supported Platforms
 
-| Ubuntu Version | GTK3 | GTK4 | Plasma |
-|----------------|------|------|--------|
-| 22.04 LTS      | ✅   | ❌   | ✅     |
-| 24.04 LTS      | ✅   | ✅   | ✅     |
+| Ubuntu Version | GTK3 | GTK4 | Plasma  |
+|----------------|------|------|---------|
+| 22.04 LTS      | ✅   | ❌   | ✅ (Qt5) |
+| 24.04 LTS      | ✅   | ✅   | ✅ (Qt5) |
+| 26.04 LTS      | ✅   | ✅   | ✅ (Qt6) |
 
-Note: GTK4 editor requires `libnma-gtk4` which is not available on Ubuntu 22.04.
+Notes:
+- GTK4 editor requires `libnma-gtk4` which is not available on Ubuntu 22.04.
+- The Plasma plugin is built against Qt5/KF5 on 22.04/24.04 and Qt6/KF6 on 26.04;
+  install paths differ (`/usr/lib/x86_64-linux-gnu/qt5/plugins/...` vs `qt6/`).
 
 ## Why Separate Packages?
 

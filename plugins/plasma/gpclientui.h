@@ -20,8 +20,10 @@ public:
     SettingWidget *askUser(const NetworkManager::VpnSetting::Ptr &setting, const QStringList &hints, QWidget *parent = nullptr) override;
     QString suggestedFileName(const NetworkManager::ConnectionSettings::Ptr &connection) const override;
     
-#if !defined(NETWORKMANAGERQT_VERSION) || NETWORKMANAGERQT_VERSION < QT_VERSION_CHECK(5, 102, 0)
-    // Required for KF5 < 5.102 (Ubuntu 22.04)
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0) && \
+    (!defined(NETWORKMANAGERQT_VERSION) || NETWORKMANAGERQT_VERSION < QT_VERSION_CHECK(5, 102, 0))
+    // Required for KF5 < 5.102 (Ubuntu 22.04). KF6 (Ubuntu 26.04+) always has the
+    // newer VpnUiPlugin signature, so these overrides must not be declared there.
     QStringList supportedFileExtensions() const override;
     VpnUiPlugin::ImportResult importConnectionSettings(const QString &fileName) override;
     VpnUiPlugin::ExportResult exportConnectionSettings(const NetworkManager::ConnectionSettings::Ptr &connection, const QString &fileName) override;
