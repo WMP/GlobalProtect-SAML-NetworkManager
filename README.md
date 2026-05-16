@@ -18,7 +18,7 @@ NetworkManager VPN plugin for GlobalProtect (Palo Alto Networks) with SAML/SSO a
 
 ## Installation
 
-Download `.deb` packages from [GitHub Releases](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/releases) for your Ubuntu version (22.04 or 24.04).
+Download `.deb` packages from [GitHub Releases](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/releases) for your Ubuntu version (22.04, 24.04 or 26.04).
 
 Install two packages:
 1. **network-manager-gpclient** - core package (required)
@@ -107,9 +107,16 @@ nmcli connection up "GlobalProtect VPN"
 ### Build
 
 ```bash
-./build-all.sh          # Build for all Ubuntu versions
+./build-all.sh          # Build for all Ubuntu versions (22.04, 24.04, 26.04)
 ./build-all.sh 24.04    # Build for Ubuntu 24.04 only
+./build-all.sh 26.04    # Build for Ubuntu 26.04 only (Plasma 6 / Qt6 / KF6)
 ```
+
+Notes for Ubuntu 26.04:
+- The Plasma plugin is built against Qt6/KF6 (`plasma-nm`/`plasma-nm-dev`,
+  `libkf6networkmanagerqt-dev`, `qt6-base-dev`).
+- The Plasma plugin module installs into `/usr/lib/x86_64-linux-gnu/qt6/plugins/`
+  instead of the `qt5/` path used on 22.04/24.04.
 
 ### Build Individual Components
 

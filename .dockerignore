@@ -37,7 +37,9 @@ external/GlobalProtect-openconnect/target/
 
 # IDE files
 .vscode/
+.vscode
 .idea/
+.idea
 *.swp
 *.swo
 *~
@@ -46,3 +48,16 @@ external/GlobalProtect-openconnect/target/
 *.tmp
 *.bak
 *.orig
+tmp/
+
+# Claude sandbox profile mounts (character devices at project root that
+# would otherwise be read into the build context and fail with EACCES)
+.bash_profile
+.bashrc
+.gitconfig
+.mcp.json
+.profile
+.ripgreprc
+.zprofile
+.zshrc
+.claude/

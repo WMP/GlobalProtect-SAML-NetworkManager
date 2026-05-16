@@ -34,8 +34,9 @@ QString GpclientUiPlugin::suggestedFileName(const NetworkManager::ConnectionSett
     return QString();
 }
 
-#if !defined(NETWORKMANAGERQT_VERSION) || NETWORKMANAGERQT_VERSION < QT_VERSION_CHECK(5, 102, 0)
-// Required for KF5 < 5.102 (Ubuntu 22.04)
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0) && \
+    (!defined(NETWORKMANAGERQT_VERSION) || NETWORKMANAGERQT_VERSION < QT_VERSION_CHECK(5, 102, 0))
+// Required for KF5 < 5.102 (Ubuntu 22.04). Skipped on Qt6/KF6 (Ubuntu 26.04+).
 QStringList GpclientUiPlugin::supportedFileExtensions() const
 {
     return QStringList();
