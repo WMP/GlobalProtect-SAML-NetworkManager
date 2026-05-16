@@ -36,6 +36,30 @@ sudo dpkg -i <downloaded-packages>.deb
 sudo apt-get install -f  # install dependencies
 ```
 
+### Migrating from `globalprotect-openconnect`
+
+If you previously had the `globalprotect-openconnect` package installed,
+remove it first — our package declares a `Conflicts:` against it and
+`dpkg -i` will otherwise refuse to install:
+
+```bash
+sudo apt remove globalprotect-openconnect
+sudo apt autoremove
+```
+
+Make sure the runtime prerequisites are present before `dpkg -i`
+(this skips the `apt -f install` round-trip):
+
+```bash
+sudo apt install openconnect python3-sdbus vpnc-scripts
+```
+
+On Ubuntu 22.04 `python3-sdbus` is not in apt — use the `pip3 install sdbus`
+step shown above instead.
+
+Thanks to @ottuzzi for the writeup
+([#3](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/issues/3)).
+
 ## Usage
 
 1. Open GNOME Settings → Network or KDE Network Settings
