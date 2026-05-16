@@ -170,16 +170,37 @@ Firefox and Chrome also work but may require manual credential entry for Intune-
 ## Troubleshooting
 
 ```bash
-# Check service logs
-sudo journalctl -u NetworkManager -f | grep gpclient
+# Watch the service's own logs (preferred — this works while the
+# service is auto-activated by NetworkManager/systemd)
+sudo journalctl -u nm-gpclient -f
 
-# Test service manually
-sudo /usr/lib/NetworkManager/nm-gpclient-service --debug
+# Or filter NetworkManager logs for plugin activity
+sudo journalctl -u NetworkManager -f | grep gpclient
 
 # Verify installation
 ls -l /usr/lib/NetworkManager/nm-gpclient-service
 ls -l /usr/lib/x86_64-linux-gnu/NetworkManager/libnm-vpn-plugin-gpclient*.so
 ```
+
+### Running the service manually for debugging
+
+The service is normally **auto-started** on demand by systemd / D-Bus the
+first time NetworkManager touches a GlobalProtect VPN connection — you
+do not need to start it by hand for normal use.
+
+If you want to run it manually (for example with `--debug`), you have
+to stop the auto-started instance first, otherwise both processes try
+to claim the same D-Bus name and you get
+`sd_bus_internals.SdBusRequestNameExistsError` (see [#1](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/issues/1)):
+
+```bash
+sudo systemctl stop nm-gpclient
+sudo /usr/lib/NetworkManager/nm-gpclient-service --debug
+```
+
+That error on its own does **not** mean the VPN is broken — it just
+means the service is already running. The actual error from a failing
+VPN connect will be in `journalctl -u nm-gpclient`.
 
 ### Debug vpnc-script
 

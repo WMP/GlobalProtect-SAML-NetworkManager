@@ -767,8 +767,26 @@ async def main_async():
     set_default_bus(bus)
     logger.debug("Set system bus as default")
 
-    # Request service name FIRST
-    await request_default_bus_name_async(NM_DBUS_SERVICE_GPCLIENT)
+    # Request service name FIRST. If another instance already owns the name
+    # (typical: systemd/D-Bus auto-activated us when NetworkManager first
+    # touched the VPN) we exit with a clear message instead of dumping a
+    # raw sd-bus traceback that users tend to read as "VPN broken".
+    try:
+        await request_default_bus_name_async(NM_DBUS_SERVICE_GPCLIENT)
+    except Exception as e:
+        if type(e).__name__ == "SdBusRequestNameExistsError":
+            print(
+                f"ERROR: D-Bus name {NM_DBUS_SERVICE_GPCLIENT} is already owned\n"
+                "by another nm-gpclient-service instance (likely auto-started\n"
+                "by systemd/D-Bus). To run this binary manually for debugging,\n"
+                "stop the auto-started instance first:\n"
+                "    sudo systemctl stop nm-gpclient\n"
+                "and to watch its live logs without stopping it, use:\n"
+                "    sudo journalctl -u nm-gpclient -f",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        raise
     logger.info(f"Acquired D-Bus service name: {NM_DBUS_SERVICE_GPCLIENT}")
 
     # Create and export our VPN plugin object
