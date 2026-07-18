@@ -12,6 +12,8 @@ NetworkManager VPN plugin for GlobalProtect (Palo Alto Networks) with SAML/SSO a
 
 - **NetworkManager integration** - manage VPN like any other connection
 - **SAML/2FA authentication** via browser (Edge, Firefox, Chrome)
+- **Standard login & RSA token portals** - interactive username/password/OTP
+  prompts via desktop dialogs (see [docs/INTERACTIVE_AUTH.md](docs/INTERACTIVE_AUTH.md))
 - **Desktop support** - GNOME Settings (GTK3/GTK4) and KDE Plasma
 - **Routing control** - configure which traffic goes through VPN
 - **Systemd service** - automatic VPN service management via D-Bus
@@ -66,6 +68,12 @@ Thanks to @ottuzzi for the writeup
 2. Add VPN → GlobalProtect
 3. Enter gateway URL (e.g. `vpn.example.com`)
 4. Connect - browser will open for SAML authentication
+
+Portals that use a standard login (username/password) or an RSA SecurID
+token instead of SAML are supported too - the plugin asks for the
+credentials in a dialog when gpclient needs them. See
+[docs/INTERACTIVE_AUTH.md](docs/INTERACTIVE_AUTH.md) for details and for
+storing the username/password in the connection.
 
 ```bash
 # Or via command line
@@ -219,6 +227,7 @@ Debug logs are written to `/tmp/vpnc-script2.log`.
 - [docs/README.md](docs/README.md) - Full documentation
 - [docs/EDGE_WRAPPER.md](docs/EDGE_WRAPPER.md) - Edge wrapper and browser integration
 - [docs/PYTHON_SERVICE.md](docs/PYTHON_SERVICE.md) - Service implementation details
+- [docs/INTERACTIVE_AUTH.md](docs/INTERACTIVE_AUTH.md) - Standard login / RSA token / OTP authentication
 - [docs/GNOME_SETTINGS_INTEGRATION.md](docs/GNOME_SETTINGS_INTEGRATION.md) - GNOME integration
 - [docs/PLASMA_IMPLEMENTATION.md](docs/PLASMA_IMPLEMENTATION.md) - Plasma plugin details
 

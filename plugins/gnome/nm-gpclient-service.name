@@ -7,4 +7,7 @@ program=/usr/lib/NetworkManager/nm-gpclient-service
 plugin=libnm-vpn-plugin-gpclient.so
 
 [GNOME]
+auth-dialog=/usr/libexec/nm-gpclient-auth-dialog
 properties=libnm-gpclient-properties
+supports-external-ui-mode=false
+supports-hints=true

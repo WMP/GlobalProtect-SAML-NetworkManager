@@ -9,15 +9,19 @@ Rewritten using python-sdbus for proper D-Bus interface implementation.
 """
 
 import asyncio
+import fcntl
 import logging
 import os
+import pty
+import re
 import signal
 import socket
 import struct
 import subprocess
 import sys
+import termios
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sdbus import (
     DbusInterfaceCommonAsync,
@@ -55,6 +59,144 @@ NM_VPN_PLUGIN_FAILURE_LOGIN_FAILED = 0
 NM_VPN_PLUGIN_FAILURE_CONNECT_FAILED = 1
 NM_VPN_PLUGIN_FAILURE_BAD_IP_CONFIG = 2
 
+# How long we wait for the user to answer an interactive secrets request
+# (NewSecrets from NetworkManager) before giving up.
+SECRETS_REQUEST_TIMEOUT = 300
+
+# How long a prompt candidate must stay unchanged before we act on it.
+# gpclient (inquire) renders prompts incrementally; the debounce avoids
+# reacting to half-rendered lines.
+PROMPT_DEBOUNCE_SECONDS = 0.5
+
+# --- Interactive prompt detection -------------------------------------------
+#
+# For portals that do NOT use SAML (Prelogin::Standard in gpclient, e.g. RSA
+# SecurID token challenges - see issue #6), gpclient prompts interactively on
+# its terminal via the `inquire` crate:
+#
+#   Please enter RSA token (Portal: vpn.example.com)   <- plain println banner
+#   ? Username:                                        <- inquire Text prompt
+#   ? Password:                                        <- inquire Password prompt
+#
+# and for gateway MFA challenges:
+#
+#   ? <server-provided message>                        <- inquire Text prompt
+#
+# We run gpclient under a PTY so those prompts actually render, detect them in
+# the output stream and answer them either from secrets stored in the NM
+# connection or interactively via the SecretsRequired/NewSecrets D-Bus flow.
+
+# CSI / OSC / other escape sequences emitted by inquire (crossterm)
+ANSI_ESCAPE_RE = re.compile(
+    r"\x1b\[[0-9;?]*[ -/]*[@-~]"  # CSI sequences (colors, cursor, clear)
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC sequences
+    r"|\x1b[@-Z\\-_]"  # other Fe escape sequences
+)
+
+# Control characters except \n, \r and \t
+CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+# "Please enter RSA token (Portal: vpn.example.com)" banner printed by
+# gpclient before a standard (non-SAML) authentication round.
+AUTH_BANNER_RE = re.compile(
+    r"^(?P<message>.+?)\s*\((?P<kind>Portal|Gateway):\s*(?P<server>[^)]+)\)\s*$"
+)
+
+USERNAME_LABEL_WORDS = ("user", "login", "email", "e-mail")
+ONE_TIME_SECRET_WORDS = (
+    "token",
+    "otp",
+    "passcode",
+    "pin",
+    "code",
+    "challenge",
+    "tan",
+    "rsa",
+)
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences and control chars (except \\n \\r \\t)"""
+    text = ANSI_ESCAPE_RE.sub("", text)
+    return CONTROL_CHARS_RE.sub("", text)
+
+
+def parse_auth_banner(line: str) -> Optional[Dict[str, str]]:
+    """Parse gpclient's 'message (Portal|Gateway: server)' auth banner line"""
+    match = AUTH_BANNER_RE.match(line.strip())
+    if not match:
+        return None
+    return match.groupdict()
+
+
+def detect_prompt(tail: str, last_answer: str = "") -> Optional[str]:
+    """Detect a pending inquire prompt in the unterminated output tail.
+
+    Returns the prompt label (e.g. "Username", "Password", "Enter the next
+    tokencode") or None when the tail is not a prompt waiting for input.
+    """
+    candidate = tail.strip()
+    if not candidate.startswith("?"):
+        return None
+    body = candidate[1:].strip()
+    if not body:
+        return None
+    # Skip echo of an answer we already typed (visible for Text prompts)
+    if last_answer and last_answer in body:
+        return None
+    if ":" in body:
+        label, _, after_colon = body.rpartition(":")
+        # "? Password: ******" (masked echo) or a finalized "? User: john"
+        # line is not a prompt waiting for input
+        if after_colon.strip():
+            return None
+        label = label.strip()
+    else:
+        # MFA / OTP prompts use a server-provided message with no colon
+        label = body
+    return label or None
+
+
+def classify_prompt(label: str) -> str:
+    """Classify a prompt label as 'username' or 'password' (any secret)"""
+    lowered = label.lower()
+    if any(word in lowered for word in USERNAME_LABEL_WORDS):
+        return "username"
+    return "password"
+
+
+def is_one_time_secret(text: str) -> bool:
+    """True when the label/banner suggests a one-time secret (RSA token, OTP).
+
+    One-time secrets must never be answered from a stored password - the user
+    has to be asked every time.
+    """
+    lowered = text.lower()
+    return any(word in lowered for word in ONE_TIME_SECRET_WORDS)
+
+
+class OutputScanner:
+    """Split a raw PTY output stream into complete lines and a pending tail.
+
+    inquire redraws prompt lines using \\r, so both \\r and \\n are treated as
+    line separators; the last unterminated segment is the tail (a potential
+    prompt waiting for input).
+    """
+
+    def __init__(self):
+        self._tail = ""
+
+    @property
+    def tail(self) -> str:
+        return self._tail
+
+    def feed(self, text: str) -> List[str]:
+        """Feed decoded output, return newly completed lines"""
+        pending = self._tail + text
+        segments = re.split(r"[\r\n]", pending)
+        self._tail = segments[-1]
+        return [seg for seg in segments[:-1] if seg.strip()]
+
 
 class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFACE_VPN):
     """NetworkManager VPN Plugin for gpclient using python-sdbus"""
@@ -76,6 +218,23 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self.ignore_auto_routes = False
         self.custom_routes = []
 
+        # Interactive authentication state (issue #6: RSA token / standard
+        # login portals where gpclient prompts on its terminal)
+        self.vpn_username = ""
+        self.vpn_password = ""
+        self._interactive = False
+        self._pty_master = None
+        self._pty_transport = None
+        self._output_scanner = OutputScanner()
+        self._auth_banner = None  # last "message (Portal: server)" banner
+        self._prompt_task = None  # debounce task for prompt handling
+        self._answering = False  # a prompt is currently being answered
+        self._secret_future = None  # pending SecretsRequired -> NewSecrets
+        self._last_answer = ""  # last answer written to the PTY
+        self._username_uses = 0  # how many times stored username was used
+        self._password_uses = 0  # how many times stored password was used
+        self._login_failed = False
+
         logger.info("GpclientVPNPlugin initialized with python-sdbus")
 
     @dbus_method_async("a{sa{sv}}", "s")
@@ -90,10 +249,47 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         """
         logger.debug("=== NeedSecrets() called ===")
         logger.debug(f"Settings data: {settings}")
-        logger.info("NeedSecrets() returning empty string (no secrets needed)")
-        # GlobalProtect uses browser-based SAML auth, no additional secrets needed here
-        # All authentication is handled by gpclient with gpauth
-        return ""
+
+        # SAML (default): authentication happens in the browser via gpauth,
+        # no secrets needed upfront.
+        #
+        # Standard login portals (auth-mode=credentials): ask NM to collect
+        # the password upfront so a fully stored username/password connection
+        # works non-interactively. One-time challenges (RSA token, OTP) are
+        # requested mid-connection via SecretsRequired instead.
+        data, secrets = self._parse_vpn_section(settings)
+
+        if data.get("auth-mode", "saml") != "credentials":
+            logger.info("NeedSecrets(): SAML mode, no secrets needed")
+            return ""
+
+        # password-flags: 4 = NOT_REQUIRED
+        if data.get("password-flags", "0") == "4":
+            logger.info("NeedSecrets(): password not required")
+            return ""
+
+        if secrets.get("password"):
+            logger.info("NeedSecrets(): password already present")
+            return ""
+
+        logger.info("NeedSecrets(): credentials mode, requesting 'vpn' secrets")
+        return "vpn"
+
+    @staticmethod
+    def _parse_vpn_section(
+        connection: Dict[str, Dict[str, Tuple[str, Any]]],
+    ) -> Tuple[Dict[str, str], Dict[str, str]]:
+        """Extract (data, secrets) dicts from a connection's vpn section"""
+        vpn_section = connection.get("vpn", {})
+        vpn_data = {}
+        for key, value in vpn_section.items():
+            if isinstance(value, tuple) and len(value) == 2:
+                vpn_data[key] = value[1]
+            else:
+                vpn_data[key] = value
+        data = vpn_data.get("data", {}) or {}
+        secrets = vpn_data.get("secrets", {}) or {}
+        return data, secrets
 
     @dbus_method_async("a{sa{sv}}")
     async def Connect(self, connection: Dict[str, Dict[str, Tuple[str, Any]]]) -> None:
@@ -103,7 +299,24 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             connection: Dictionary with VPN connection settings
         """
         logger.info("=== Connect() called ===")
+        await self._do_connect(connection, interactive=False)
+
+    async def _do_connect(
+        self,
+        connection: Dict[str, Dict[str, Tuple[str, Any]]],
+        interactive: bool,
+    ) -> None:
+        """Shared implementation for Connect() and ConnectInteractive()"""
         logger.debug(f"Full connection data: {connection}")
+        self._interactive = interactive
+        self._auth_banner = None
+        self._answering = False
+        self._secret_future = None
+        self._last_answer = ""
+        self._username_uses = 0
+        self._password_uses = 0
+        self._login_failed = False
+        self._output_scanner = OutputScanner()
 
         try:
             # Extract VPN data
@@ -173,6 +386,16 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             data_dict = vpn_data.get("data", {})
             logger.debug(f"Data dict: {data_dict}")
 
+            # Stored credentials for standard (non-SAML) login portals.
+            # Username lives in vpn.data, password in vpn.secrets.
+            secrets_dict = vpn_data.get("secrets", {}) or {}
+            self.vpn_username = data_dict.get("username", "")
+            self.vpn_password = secrets_dict.get("password", "")
+            if self.vpn_username:
+                logger.info(f"Stored username: {self.vpn_username}")
+            if self.vpn_password:
+                logger.info("Stored password: <present>")
+
             # Get gateway (required)
             self.gateway = data_dict.get("gateway", "")
             if not self.gateway:
@@ -237,6 +460,16 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                 pass
             self.tunnel_check_task = None
 
+        # Stop pending prompt handling
+        if self._prompt_task:
+            self._prompt_task.cancel()
+            self._prompt_task = None
+
+        # Cancel any pending interactive secrets request
+        if self._secret_future and not self._secret_future.done():
+            self._secret_future.cancel()
+        self._secret_future = None
+
         # Stop stdout monitoring
         if self.stdout_monitor_task:
             self.stdout_monitor_task.cancel()
@@ -245,6 +478,21 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             except asyncio.CancelledError:
                 pass
             self.stdout_monitor_task = None
+
+        # Close the PTY
+        if self._pty_transport:
+            try:
+                self._pty_transport.close()
+            except Exception as e:
+                logger.debug(f"Error closing PTY transport: {e}")
+            self._pty_transport = None
+            self._pty_master = None
+        elif self._pty_master is not None:
+            try:
+                os.close(self._pty_master)
+            except OSError:
+                pass
+            self._pty_master = None
 
         # Kill gpclient process
         if self.gpclient_process:
@@ -280,6 +528,15 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self.hip_enabled = True
         self.never_default = False
         self.custom_routes = []
+        self.vpn_username = ""
+        self.vpn_password = ""
+        self._interactive = False
+        self._auth_banner = None
+        self._answering = False
+        self._last_answer = ""
+        self._username_uses = 0
+        self._password_uses = 0
+        self._login_failed = False
 
         # Emit state change
         self.StateChanged.emit(NM_VPN_SERVICE_STATE_STOPPED)
@@ -312,16 +569,31 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         connection: Dict[str, Dict[str, Tuple[str, Any]]],
         details: Dict[str, Tuple[str, Any]],
     ) -> None:
-        """Connect with interactive secrets (not used for gpclient)"""
-        logger.info("ConnectInteractive() called, delegating to Connect()")
-        await self.Connect(connection)
+        """Connect with support for interactive secrets requests.
+
+        When gpclient hits an interactive challenge (RSA token, OTP, standard
+        login) we emit SecretsRequired and receive the answer via NewSecrets.
+        """
+        logger.info("=== ConnectInteractive() called ===")
+        await self._do_connect(connection, interactive=True)
 
     @dbus_method_async("a{sa{sv}}")
     async def NewSecrets(
         self, connection: Dict[str, Dict[str, Tuple[str, Any]]]
     ) -> None:
-        """New secrets provided (not used for gpclient)"""
+        """Secrets provided by NetworkManager after a SecretsRequired signal"""
         logger.info("NewSecrets() called")
+        data, secrets = self._parse_vpn_section(connection)
+        logger.debug(f"NewSecrets keys: {list(secrets.keys())}")
+
+        # Refresh stored credentials in case the user (re)entered them
+        if data.get("username"):
+            self.vpn_username = data["username"]
+
+        if self._secret_future and not self._secret_future.done():
+            self._secret_future.set_result(secrets)
+        else:
+            logger.warning("NewSecrets() received but no secret request pending")
 
     # Signals
     @dbus_signal_async("u")
@@ -447,6 +719,10 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             if self.hip_enabled:
                 cmd.append("--hip")
 
+            # Pass stored username so standard-login portals don't prompt for it
+            if self.vpn_username:
+                cmd.extend(["--user", self.vpn_username])
+
             cmd.extend(
                 [
                     "--browser",
@@ -493,17 +769,42 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                     f"Exporting custom DNS domains: {env['GPCLIENT_CUSTOM_DNS_DOMAINS']}"
                 )
 
-            # Spawn gpclient
-            self.gpclient_process = await asyncio.create_subprocess_exec(
-                *cmd,
-                env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
+            # Spawn gpclient under a PTY. Standard-login portals (RSA token
+            # challenges, issue #6) make gpclient prompt interactively via the
+            # `inquire` crate, which needs a real terminal. With a plain pipe
+            # those prompts fail/hang; with a PTY we can detect them in the
+            # output and answer via NM's secrets flow.
+            env["TERM"] = "xterm-256color"
+
+            master_fd, slave_fd = pty.openpty()
+            # Wide window so prompts don't wrap mid-line
+            fcntl.ioctl(
+                master_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 200, 0, 0)
             )
+
+            def _child_setup():
+                # New session + make the PTY slave (fd 0) the controlling
+                # terminal so /dev/tty works inside gpclient
+                os.setsid()
+                fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+            try:
+                self.gpclient_process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    env=env,
+                    stdin=slave_fd,
+                    stdout=slave_fd,
+                    stderr=slave_fd,
+                    preexec_fn=_child_setup,
+                )
+            finally:
+                os.close(slave_fd)
+
+            self._pty_master = master_fd
 
             logger.info(f"Started gpclient with PID {self.gpclient_process.pid}")
 
-            # Start monitoring stdout
+            # Start monitoring PTY output
             self.stdout_monitor_task = asyncio.create_task(
                 self._monitor_gpclient_output()
             )
@@ -515,15 +816,55 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             return False
 
     async def _monitor_gpclient_output(self) -> None:
-        """Monitor gpclient stdout for connection messages"""
-        if not self.gpclient_process or not self.gpclient_process.stdout:
+        """Monitor gpclient PTY output for messages and interactive prompts"""
+        if not self.gpclient_process or self._pty_master is None:
             return
 
+        loop = asyncio.get_running_loop()
+        reader = asyncio.StreamReader()
+        protocol = asyncio.StreamReaderProtocol(reader)
+        pty_file = os.fdopen(self._pty_master, "rb", buffering=0)
+
         try:
-            async for line_bytes in self.gpclient_process.stdout:
-                line = line_bytes.decode("utf-8", errors="replace").strip()
-                if line:
+            self._pty_transport, _ = await loop.connect_read_pipe(
+                lambda: protocol, pty_file
+            )
+        except Exception as e:
+            logger.error(f"Failed to attach PTY reader: {e}")
+            pty_file.close()
+            self._pty_master = None
+            return
+
+        last_logged_line = None
+
+        try:
+            while True:
+                try:
+                    chunk = await reader.read(4096)
+                except OSError:
+                    # PTY master raises EIO when the child exits
+                    break
+                if not chunk:
+                    break
+
+                text = strip_ansi(chunk.decode("utf-8", errors="replace"))
+                lines = self._output_scanner.feed(text)
+
+                for line in lines:
+                    line = line.strip()
+                    # inquire redraws lines on every keystroke; skip repeats
+                    if line == last_logged_line:
+                        continue
+                    last_logged_line = line
                     logger.info(f"gpclient output: {line}")
+
+                    banner = parse_auth_banner(line)
+                    if banner:
+                        logger.info(
+                            f"Detected auth banner: {banner['message']} "
+                            f"({banner['kind']}: {banner['server']})"
+                        )
+                        self._auth_banner = banner
 
                     # Check for connection success indicators
                     if any(
@@ -539,16 +880,177 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                             "Detected VPN connection message - checking for interface"
                         )
 
+                self._schedule_prompt_check()
+
             # Process ended
             returncode = await self.gpclient_process.wait()
             logger.info(f"gpclient process exited with status {returncode}")
 
-            if returncode != 0:
+            if returncode != 0 and not self._login_failed:
                 logger.error(f"gpclient failed with exit code {returncode}")
                 self.Failure.emit(NM_VPN_PLUGIN_FAILURE_CONNECT_FAILED)
 
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             logger.error(f"Error monitoring gpclient output: {e}")
+
+    def _schedule_prompt_check(self) -> None:
+        """(Re)schedule the debounced check for a pending interactive prompt.
+
+        Called after every output chunk: new output cancels the previous
+        check, so we only act on a prompt once the output has been stable for
+        PROMPT_DEBOUNCE_SECONDS.
+        """
+        if self._prompt_task and not self._prompt_task.done():
+            self._prompt_task.cancel()
+
+        # A prompt is already being answered (possibly waiting minutes for
+        # the user via SecretsRequired) - don't detect it again
+        if self._answering:
+            return
+
+        label = detect_prompt(self._output_scanner.tail, self._last_answer)
+        if label is None:
+            self._prompt_task = None
+            return
+
+        async def _debounced(tail_snapshot: str):
+            await asyncio.sleep(PROMPT_DEBOUNCE_SECONDS)
+            # Only act if the output is still exactly this prompt
+            if self._output_scanner.tail != tail_snapshot:
+                return
+            await self._handle_prompt(label)
+
+        self._prompt_task = asyncio.create_task(
+            _debounced(self._output_scanner.tail)
+        )
+
+    async def _handle_prompt(self, label: str) -> None:
+        """Answer an interactive gpclient prompt (username/password/OTP)"""
+        logger.info(f"Detected interactive prompt: {label!r}")
+
+        banner_msg = self._auth_banner["message"] if self._auth_banner else ""
+        kind = classify_prompt(label)
+
+        self._answering = True
+        try:
+            if kind == "username":
+                if self.vpn_username and self._username_uses == 0:
+                    self._username_uses += 1
+                    logger.info("Answering username prompt from stored username")
+                    answer = self.vpn_username
+                else:
+                    answer = await self._request_secret_interactive(
+                        "username", label, banner_msg
+                    )
+            else:
+                one_time = is_one_time_secret(label) or is_one_time_secret(
+                    banner_msg
+                )
+                if one_time:
+                    logger.info(
+                        "Prompt looks like a one-time secret (token/OTP), "
+                        "asking the user"
+                    )
+                    answer = await self._request_secret_interactive(
+                        "otp", label, banner_msg
+                    )
+                elif self.vpn_password and self._password_uses == 0:
+                    self._password_uses += 1
+                    logger.info("Answering password prompt from stored password")
+                    answer = self.vpn_password
+                else:
+                    answer = await self._request_secret_interactive(
+                        "password", label, banner_msg
+                    )
+        except Exception as e:
+            logger.error(f"Cannot answer prompt {label!r}: {e}")
+            self._fail_login(str(e))
+            return
+        finally:
+            self._answering = False
+
+        self._write_answer(answer)
+
+    async def _request_secret_interactive(
+        self, secret_key: str, label: str, banner_msg: str
+    ) -> str:
+        """Ask the user for a secret via SecretsRequired/NewSecrets.
+
+        Emits the SecretsRequired signal with the requested secret name as a
+        hint (plus an x-vpn-message: hint carrying the human-readable prompt)
+        and waits for NetworkManager to deliver the answer via NewSecrets().
+        """
+        if not self._interactive:
+            raise Exception(
+                f"gpclient asked for {label!r} but the connection was not "
+                "started interactively - cannot prompt the user. "
+                "Store the credentials in the connection or activate it "
+                "from a GUI applet."
+            )
+
+        server_part = ""
+        if self._auth_banner:
+            server_part = (
+                f" ({self._auth_banner['kind']}: {self._auth_banner['server']})"
+            )
+        if banner_msg:
+            message = f"{banner_msg}{server_part} - {label}"
+        else:
+            message = f"{label}{server_part}"
+
+        logger.info(f"Requesting secret {secret_key!r} from user: {message}")
+
+        loop = asyncio.get_running_loop()
+        self._secret_future = loop.create_future()
+
+        hints = [f"x-vpn-message:{message}", secret_key]
+        self.SecretsRequired.emit((message, hints))
+
+        try:
+            secrets = await asyncio.wait_for(
+                self._secret_future, timeout=SECRETS_REQUEST_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            raise Exception(
+                f"Timed out waiting for the user to provide {secret_key!r}"
+            )
+        finally:
+            self._secret_future = None
+
+        value = secrets.get(secret_key, "")
+        if not value and len(secrets) == 1:
+            # Some agents return the secret under a different key
+            value = next(iter(secrets.values()))
+        if not value:
+            raise Exception(f"User did not provide {secret_key!r}")
+
+        return value
+
+    def _write_answer(self, answer: str) -> None:
+        """Type an answer into gpclient's PTY"""
+        if self._pty_master is None:
+            logger.error("Cannot write answer: PTY is gone")
+            return
+        self._last_answer = answer
+        try:
+            # inquire (crossterm raw mode) treats \r as Enter
+            os.write(self._pty_master, answer.encode("utf-8") + b"\r")
+            logger.info("Answer written to gpclient")
+        except OSError as e:
+            logger.error(f"Failed to write answer to PTY: {e}")
+
+    def _fail_login(self, reason: str) -> None:
+        """Emit a login failure and terminate gpclient"""
+        logger.error(f"Login failed: {reason}")
+        self._login_failed = True
+        self.Failure.emit(NM_VPN_PLUGIN_FAILURE_LOGIN_FAILED)
+        if self.gpclient_process:
+            try:
+                self.gpclient_process.terminate()
+            except ProcessLookupError:
+                pass
 
     async def _check_tunnel_loop(self) -> None:
         """Periodically check for tunnel interface"""

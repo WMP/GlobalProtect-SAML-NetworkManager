@@ -52,6 +52,8 @@ install: all
 	install -D -m 755 service/nm-gpclient-service.py /usr/lib/NetworkManager/nm-gpclient-service
 	# Install scripts
 	install -D -m 755 scripts/edge-wrapper.sh /usr/libexec/gpclient/edge-wrapper
+	# Install auth dialog (interactive credentials/RSA token prompts)
+	install -D -m 755 auth-dialog/nm-gpclient-auth-dialog.py /usr/libexec/nm-gpclient-auth-dialog
 	# Install gpclient and gpauth binaries
 	install -D -m 755 gpclient /usr/bin/gpclient
 	install -D -m 755 gpauth /usr/bin/gpauth
@@ -109,6 +111,9 @@ install-dev: gnome-plugins
 	# Install helper scripts
 	sudo install -m 755 scripts/edge-wrapper.sh $(NM_LIBEXEC_DIR)/edge-wrapper
 
+	# Install auth dialog (interactive credentials/RSA token prompts)
+	sudo install -m 755 auth-dialog/nm-gpclient-auth-dialog.py /usr/libexec/nm-gpclient-auth-dialog
+
 	# Install D-Bus configuration
 	sudo install -m 644 config/org.freedesktop.NetworkManager.gpclient.service $(DBUS_SERVICES_DIR)/
 	sudo install -m 644 config/nm-gpclient.conf $(DBUS_CONF_DIR)/
@@ -132,6 +137,7 @@ uninstall-dev:
 	sudo rm -f $(NM_LIB_DIR)/nm-gpclient-service
 	sudo rm -f /usr/lib/libnm-gpclient-properties
 	sudo rm -rf $(NM_LIBEXEC_DIR)
+	sudo rm -f /usr/libexec/nm-gpclient-auth-dialog
 	sudo rm -f $(DBUS_SERVICES_DIR)/org.freedesktop.NetworkManager.gpclient.service
 	sudo rm -f $(DBUS_CONF_DIR)/nm-gpclient.conf
 	sudo rm -f $(SYSTEMD_DIR)/nm-gpclient.service
@@ -163,6 +169,11 @@ test-ui: install-dev restart-nm $(ARTIFACTS_DIR)
 	@echo "DISPLAY: $${DISPLAY:-not set}"
 	python3 -m pytest tests/ -v --tb=short 2>&1 | tee $(ARTIFACTS_DIR)/test_ui.log || \
 		($(MAKE) screenshot SCREEN_NAME=fail_screen && exit 1)
+
+# Run unit tests (no GUI/X11 required)
+.PHONY: test-unit
+test-unit:
+	python3 -m pytest tests/unit -v
 
 # Run GUI tests without rebuilding (assumes plugin already installed)
 test-ui-only: $(ARTIFACTS_DIR)

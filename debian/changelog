@@ -1,3 +1,16 @@
+network-manager-gpclient (1.3.0-1) unstable; urgency=medium
+
+  * Support portals with standard login / RSA token challenges (closes #6):
+    run gpclient under a PTY, detect its interactive prompts and answer
+    them from stored connection secrets or interactively via the
+    NetworkManager SecretsRequired/NewSecrets flow
+  * Add GNOME/nm-applet auth dialog (/usr/libexec/nm-gpclient-auth-dialog)
+  * New connection options: vpn.data username, vpn.data auth-mode=credentials,
+    vpn.secrets password
+  * Add unit tests for prompt detection (make test-unit)
+
+ -- WMP <example@example.org>  Sat, 18 Jul 2026 12:00:00 +0200
+
 network-manager-gpclient (1.2.0-1) unstable; urgency=medium
 
   * Add Ubuntu 26.04 LTS build target (Plasma 6 / Qt6 / KF6)
