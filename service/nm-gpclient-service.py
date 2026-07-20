@@ -55,6 +55,10 @@ NM_VPN_PLUGIN_FAILURE_LOGIN_FAILED = 0
 NM_VPN_PLUGIN_FAILURE_CONNECT_FAILED = 1
 NM_VPN_PLUGIN_FAILURE_BAD_IP_CONFIG = 2
 
+# Interface names the tunnel detection looks for. gpd0 is created
+# exclusively by gpclient; tun0/tun1 may also belong to other VPN clients.
+TUNNEL_INTERFACES = ["gpd0", "tun0", "tun1"]
+
 
 class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFACE_VPN):
     """NetworkManager VPN Plugin for gpclient using python-sdbus"""
@@ -75,6 +79,12 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self.never_default = False
         self.ignore_auto_routes = False
         self.custom_routes = []
+
+        # Tunnel-candidate interfaces (with their IPs) that already existed
+        # when Connect() started - these must never be picked up by tunnel
+        # detection (stale gpd0 from a crashed session, another VPN's tun0;
+        # issue #7)
+        self._preexisting_ifaces = {}
 
         logger.info("GpclientVPNPlugin initialized with python-sdbus")
 
@@ -207,6 +217,13 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             # Emit state change: preparing
             self.StateChanged.emit(NM_VPN_SERVICE_STATE_STARTING)
 
+            # Clean up a stale gpd0 left by a crashed previous session and
+            # snapshot the tunnel-candidate interfaces that exist BEFORE
+            # gpclient starts, so tunnel detection cannot pick up a stale
+            # or foreign interface (issue #7)
+            await self._cleanup_stale_gpd0()
+            self._preexisting_ifaces = await self._snapshot_tunnel_interfaces()
+
             # Start gpclient process
             success = await self._start_gpclient()
 
@@ -280,6 +297,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self.hip_enabled = True
         self.never_default = False
         self.custom_routes = []
+        self._preexisting_ifaces = {}
 
         # Emit state change
         self.StateChanged.emit(NM_VPN_SERVICE_STATE_STOPPED)
@@ -550,61 +568,152 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         except Exception as e:
             logger.error(f"Error monitoring gpclient output: {e}")
 
-    async def _check_tunnel_loop(self) -> None:
-        """Periodically check for tunnel interface"""
-        tunnel_interfaces = ["gpd0", "tun0", "tun1"]
+    async def _get_iface_ipv4(self, iface: str) -> Tuple[Any, int]:
+        """Get the first IPv4 address of an interface.
+
+        Returns:
+            (ip_address, prefix) tuple; ip_address is None when the
+            interface has no IPv4 address or the lookup failed.
+        """
+        try:
+            result = await asyncio.create_subprocess_exec(
+                "ip",
+                "-4",
+                "addr",
+                "show",
+                iface,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await result.communicate()
+        except Exception as e:
+            logger.warning(f"Failed to get tunnel IP for {iface}: {e}")
+            return None, 32
+
+        ip_addr = None
+        prefix = 32
+        for line in stdout.decode().split("\n"):
+            if "inet " in line:
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    addr_with_prefix = parts[1]
+                    if "/" in addr_with_prefix:
+                        ip_addr, prefix_str = addr_with_prefix.split("/")
+                        prefix = int(prefix_str)
+                    else:
+                        ip_addr = addr_with_prefix
+                break
+        return ip_addr, prefix
+
+    async def _snapshot_tunnel_interfaces(self) -> Dict[str, Any]:
+        """Record tunnel-candidate interfaces existing before gpclient starts.
+
+        An interface recorded here (with an unchanged IP) is never accepted
+        by _check_tunnel_loop: it is either a stale gpd0 from a crashed
+        session or another VPN client's tunnel (issue #7).
+        """
+        snapshot = {}
+        for iface in TUNNEL_INTERFACES:
+            if os.path.exists(f"/sys/class/net/{iface}"):
+                ip_addr, _ = await self._get_iface_ipv4(iface)
+                snapshot[iface] = ip_addr
+                logger.info(
+                    f"Interface {iface} (IP: {ip_addr}) already exists before "
+                    "gpclient start - it will be ignored by tunnel detection "
+                    "unless its address changes"
+                )
+        return snapshot
+
+    async def _cleanup_stale_gpd0(self) -> None:
+        """Remove a leftover gpd0 interface from a previous session.
+
+        gpd0 is created exclusively by gpclient and gpclient enforces a
+        single session via its lock file, so a gpd0 with no running gpclient
+        process is always stale. A stale gpd0 blackholes routing (the portal
+        becomes unreachable) and used to be picked up by tunnel detection as
+        a live connection (issue #7). tun0/tun1 may belong to other VPN
+        clients and are never touched.
+        """
+        if not os.path.exists("/sys/class/net/gpd0"):
+            return
 
         try:
+            proc = await asyncio.create_subprocess_exec(
+                "pgrep",
+                "-x",
+                "gpclient",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            if await proc.wait() == 0:
+                logger.warning(
+                    "gpd0 exists and a gpclient process is running - "
+                    "not cleaning up"
+                )
+                return
+        except Exception as e:
+            logger.warning(f"Could not check for a running gpclient: {e}")
+            return
+
+        logger.warning(
+            "Found stale gpd0 interface with no gpclient process - cleaning up"
+        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "/usr/bin/gpclient", "disconnect"
+            )
+            await asyncio.wait_for(proc.wait(), timeout=10)
+        except Exception as e:
+            logger.debug(f"'gpclient disconnect' during cleanup failed: {e}")
+
+        if os.path.exists("/sys/class/net/gpd0"):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "ip", "link", "del", "gpd0"
+                )
+                await proc.wait()
+            except Exception as e:
+                logger.error(f"Failed to delete stale gpd0: {e}")
+
+        if not os.path.exists("/sys/class/net/gpd0"):
+            logger.info("Stale gpd0 interface removed")
+
+    async def _check_tunnel_loop(self) -> None:
+        """Periodically check for tunnel interface"""
+        try:
             while True:
-                for iface in tunnel_interfaces:
+                for iface in TUNNEL_INTERFACES:
                     iface_path = f"/sys/class/net/{iface}"
                     if not os.path.exists(iface_path):
                         continue
 
                     # Check if interface has an IP address (not just exists)
-                    try:
-                        result = await asyncio.create_subprocess_exec(
-                            "ip",
-                            "-4",
-                            "addr",
-                            "show",
-                            iface,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE,
+                    ip_addr, prefix = await self._get_iface_ipv4(iface)
+
+                    # Only consider interface valid if it has an IP
+                    if not ip_addr:
+                        logger.debug(
+                            f"Interface {iface} exists but has no IP, skipping"
                         )
-                        stdout, _ = await result.communicate()
-
-                        # Parse IP address
-                        ip_addr = None
-                        prefix = 32
-                        for line in stdout.decode().split("\n"):
-                            if "inet " in line:
-                                parts = line.strip().split()
-                                if len(parts) >= 2:
-                                    addr_with_prefix = parts[1]
-                                    if "/" in addr_with_prefix:
-                                        ip_addr, prefix_str = addr_with_prefix.split(
-                                            "/"
-                                        )
-                                        prefix = int(prefix_str)
-                                    else:
-                                        ip_addr = addr_with_prefix
-                                break
-
-                        # Only consider interface valid if it has an IP
-                        if not ip_addr:
-                            logger.debug(
-                                f"Interface {iface} exists but has no IP, skipping"
-                            )
-                            continue
-
-                        logger.info(
-                            f"VPN connected - tunnel interface {iface} detected with IP {ip_addr}!"
-                        )
-                        logger.debug(f"Tunnel IP: {ip_addr}/{prefix}")
-                    except Exception as e:
-                        logger.warning(f"Failed to get tunnel IP for {iface}: {e}")
                         continue
+
+                    # Never accept an interface that already existed with the
+                    # same IP before gpclient started - it is a stale gpd0 or
+                    # another VPN's tunnel (issue #7)
+                    if (
+                        iface in self._preexisting_ifaces
+                        and self._preexisting_ifaces[iface] == ip_addr
+                    ):
+                        logger.debug(
+                            f"Interface {iface} pre-existed with unchanged "
+                            f"IP {ip_addr}, skipping"
+                        )
+                        continue
+
+                    logger.info(
+                        f"VPN connected - tunnel interface {iface} detected with IP {ip_addr}!"
+                    )
+                    logger.debug(f"Tunnel IP: {ip_addr}/{prefix}")
 
                     # Get gateway - for point-to-point VPN without explicit gateway,
                     # use the tunnel IP address itself (NetworkManager requirement)
