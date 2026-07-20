@@ -113,6 +113,57 @@ class TestOneTimeSecret:
         )
 
 
+class TestClassifyPromptKind:
+    """The positional + keyword classifier used to answer prompts (issue #6).
+
+    Covers the review findings: one-time must win over a username keyword,
+    and prompt ORDER must classify localized labels the English word lists
+    don't match.
+    """
+
+    def _plugin(self, service_module, prefilled=False):
+        plugin = service_module.GpclientVPNPlugin()
+        plugin._username_prefilled = prefilled
+        plugin._reset_phase_state()
+        return plugin
+
+    def test_one_time_wins_over_username_keyword(self, service_module):
+        p = self._plugin(service_module)
+        # "login code" contains a username word AND a one-time word
+        assert p._classify_prompt_kind("Enter your login code", "") == "otp"
+
+    def test_first_prompt_is_username_even_if_localized(self, service_module):
+        p = self._plugin(service_module)
+        # German username label matches no English keyword -> positional
+        assert p._classify_prompt_kind("Benutzername", "") == "username"
+
+    def test_password_after_username(self, service_module):
+        p = self._plugin(service_module)
+        p._answered_username = True
+        assert p._classify_prompt_kind("Passwort", "") == "password"
+
+    def test_prompt_after_password_is_one_time(self, service_module):
+        # Localized MFA prompt ("Enter the SMS code" in Polish) after the
+        # password is classified one-time by position, not vocabulary
+        p = self._plugin(service_module)
+        p._answered_username = True
+        p._answered_password = True
+        assert p._classify_prompt_kind("Wprowadź kod z SMS", "") == "otp"
+
+    def test_prefilled_username_makes_first_prompt_password(self, service_module):
+        # With --user passed, gpclient does not prompt username; the first
+        # prompt is the password
+        p = self._plugin(service_module, prefilled=True)
+        assert p._classify_prompt_kind("Password", "") == "password"
+
+    def test_rsa_banner_marks_password_prompt_one_time(self, service_module):
+        p = self._plugin(service_module)
+        p._answered_username = True
+        assert (
+            p._classify_prompt_kind("Passcode", "Please enter RSA token") == "otp"
+        )
+
+
 class TestOutputScanner:
     def test_complete_lines_and_tail(self, service_module):
         scanner = service_module.OutputScanner()

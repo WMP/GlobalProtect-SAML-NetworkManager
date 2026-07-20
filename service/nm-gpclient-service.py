@@ -241,8 +241,13 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self._answering = False  # a prompt is currently being answered
         self._secret_future = None  # pending SecretsRequired -> NewSecrets
         self._last_answer = ""  # last answer written to the PTY
-        self._username_uses = 0  # how many times stored username was used
-        self._password_uses = 0  # how many times stored password was used
+        # Per-phase prompt state (a "phase" is one Portal/Gateway auth round,
+        # delimited by the auth banner). gpclient asks username then password;
+        # any prompt after the password is a follow-up challenge (MFA).
+        self._phase_key = None
+        self._username_prefilled = False
+        self._answered_username = False
+        self._answered_password = False
         self._login_failed = False
 
         logger.info("GpclientVPNPlugin initialized with python-sdbus")
@@ -323,8 +328,10 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self._answering = False
         self._secret_future = None
         self._last_answer = ""
-        self._username_uses = 0
-        self._password_uses = 0
+        self._phase_key = None
+        self._username_prefilled = False
+        self._answered_username = False
+        self._answered_password = False
         self._login_failed = False
         self._output_scanner = OutputScanner()
 
@@ -401,6 +408,11 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             secrets_dict = vpn_data.get("secrets", {}) or {}
             self.vpn_username = data_dict.get("username", "")
             self.vpn_password = secrets_dict.get("password", "")
+            # When a username is stored we pass it as gpclient --user, so
+            # gpclient does not prompt for it - treat username as already
+            # answered in every auth phase.
+            self._username_prefilled = bool(self.vpn_username)
+            self._reset_phase_state()
             if self.vpn_username:
                 logger.info(f"Stored username: {self.vpn_username}")
             if self.vpn_password:
@@ -551,8 +563,10 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self._auth_banner = None
         self._answering = False
         self._last_answer = ""
-        self._username_uses = 0
-        self._password_uses = 0
+        self._phase_key = None
+        self._username_prefilled = False
+        self._answered_username = False
+        self._answered_password = False
         self._login_failed = False
         self._preexisting_ifaces = {}
 
@@ -851,6 +865,10 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             logger.error(f"Failed to attach PTY reader: {e}")
             pty_file.close()
             self._pty_master = None
+            # Without the reader we can neither detect prompts nor see gpclient
+            # finish, so fail the activation and stop gpclient instead of
+            # leaving NM stuck in STARTING with an orphaned process (review #9).
+            self._fail_login(f"Failed to attach PTY reader: {e}")
             return
 
         last_logged_line = None
@@ -868,6 +886,15 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                 text = strip_ansi(chunk.decode("utf-8", errors="replace"))
                 lines = self._output_scanner.feed(text)
 
+                # Once the answered prompt is committed as a full line (its
+                # echo flushed), stop suppressing on the old answer - otherwise
+                # a later prompt that merely contains it as a substring (e.g.
+                # answer "code" vs "? Enter passcode:") is suppressed forever.
+                if self._last_answer and any(
+                    self._last_answer in ln for ln in lines
+                ):
+                    self._last_answer = ""
+
                 for line in lines:
                     line = line.strip()
                     # inquire redraws lines on every keystroke; skip repeats
@@ -883,6 +910,13 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                             f"({banner['kind']}: {banner['server']})"
                         )
                         self._auth_banner = banner
+                        # A new auth banner means a new Portal/Gateway round;
+                        # reset per-phase username/password tracking so the
+                        # gateway round can reuse the stored password once.
+                        phase_key = (banner["kind"], banner["server"])
+                        if phase_key != self._phase_key:
+                            self._phase_key = phase_key
+                            self._reset_phase_state()
 
                     # Check for connection success indicators
                     if any(
@@ -944,44 +978,76 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             _debounced(self._output_scanner.tail)
         )
 
+    def _reset_phase_state(self) -> None:
+        """Reset per-phase prompt tracking at the start of an auth round.
+
+        Username counts as already answered when it was pre-filled via
+        gpclient --user (a stored username), because gpclient then does not
+        prompt for it.
+        """
+        self._answered_username = self._username_prefilled
+        self._answered_password = False
+
+    def _classify_prompt_kind(self, label: str, banner_msg: str) -> str:
+        """Decide how to answer a prompt: 'otp', 'username' or 'password'.
+
+        Combines label keywords with the prompt ORDER, which is a
+        language-independent protocol invariant: gpclient asks username then
+        password for a standard login, and any prompt after the password is a
+        follow-up challenge (MFA / OTP). Order lets us do the right thing even
+        for localized labels the English keyword lists don't match.
+        """
+        # One-time challenge, by keyword (label or banner) OR by position
+        # (anything after we've already sent the password this phase).
+        if (
+            is_one_time_secret(label)
+            or is_one_time_secret(banner_msg)
+            or self._answered_password
+        ):
+            return "otp"
+
+        # Username: by keyword, or positionally the first credential prompt
+        # (we have not answered a username yet this phase).
+        if classify_prompt(label) == "username" or not self._answered_username:
+            return "username"
+
+        return "password"
+
     async def _handle_prompt(self, label: str) -> None:
         """Answer an interactive gpclient prompt (username/password/OTP)"""
         logger.info(f"Detected interactive prompt: {label!r}")
 
         banner_msg = self._auth_banner["message"] if self._auth_banner else ""
-        kind = classify_prompt(label)
+        kind = self._classify_prompt_kind(label, banner_msg)
 
         self._answering = True
         try:
             if kind == "username":
-                if self.vpn_username and self._username_uses == 0:
-                    self._username_uses += 1
+                if self.vpn_username and not self._answered_username:
                     logger.info("Answering username prompt from stored username")
                     answer = self.vpn_username
                 else:
                     answer = await self._request_secret_interactive(
                         "username", label, banner_msg
                     )
-            else:
-                one_time = is_one_time_secret(label) or is_one_time_secret(
-                    banner_msg
+                self._answered_username = True
+            elif kind == "otp":
+                logger.info(
+                    "Prompt looks like a one-time secret (token/OTP/challenge), "
+                    "asking the user"
                 )
-                if one_time:
-                    logger.info(
-                        "Prompt looks like a one-time secret (token/OTP), "
-                        "asking the user"
-                    )
-                    answer = await self._request_secret_interactive(
-                        "otp", label, banner_msg
-                    )
-                elif self.vpn_password and self._password_uses == 0:
-                    self._password_uses += 1
+                answer = await self._request_secret_interactive(
+                    "otp", label, banner_msg
+                )
+            else:
+                if self.vpn_password and not self._answered_password:
                     logger.info("Answering password prompt from stored password")
                     answer = self.vpn_password
                 else:
                     answer = await self._request_secret_interactive(
                         "password", label, banner_msg
                     )
+                self._answered_password = True
         except Exception as e:
             logger.error(f"Cannot answer prompt {label!r}: {e}")
             self._fail_login(str(e))
