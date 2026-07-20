@@ -1160,14 +1160,18 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
 
         ip_addr = None
         prefix = 32
-        for line in stdout.decode().split("\n"):
+        for line in stdout.decode("utf-8", errors="replace").split("\n"):
             if "inet " in line:
                 parts = line.strip().split()
                 if len(parts) >= 2:
                     addr_with_prefix = parts[1]
                     if "/" in addr_with_prefix:
-                        ip_addr, prefix_str = addr_with_prefix.split("/")
-                        prefix = int(prefix_str)
+                        try:
+                            ip_addr, prefix_str = addr_with_prefix.split("/", 1)
+                            prefix = int(prefix_str)
+                        except ValueError:
+                            ip_addr = addr_with_prefix
+                            prefix = 32
                     else:
                         ip_addr = addr_with_prefix
                 break
@@ -1230,7 +1234,12 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             proc = await asyncio.create_subprocess_exec(
                 "/usr/bin/gpclient", "disconnect"
             )
-            await asyncio.wait_for(proc.wait(), timeout=10)
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                logger.warning("'gpclient disconnect' timed out, killing it")
+                proc.kill()
+                await proc.wait()
         except Exception as e:
             logger.debug(f"'gpclient disconnect' during cleanup failed: {e}")
 
@@ -1239,7 +1248,12 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                 proc = await asyncio.create_subprocess_exec(
                     "ip", "link", "del", "gpd0"
                 )
-                await proc.wait()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    logger.warning("'ip link del gpd0' timed out, killing it")
+                    proc.kill()
+                    await proc.wait()
             except Exception as e:
                 logger.error(f"Failed to delete stale gpd0: {e}")
 
