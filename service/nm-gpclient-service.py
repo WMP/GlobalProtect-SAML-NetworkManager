@@ -14,12 +14,14 @@ import logging
 import os
 import pty
 import re
+import shutil
 import signal
 import socket
 import struct
 import subprocess
 import sys
 import termios
+from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -71,6 +73,108 @@ SECRETS_REQUEST_TIMEOUT = 300
 # gpclient (inquire) renders prompts incrementally; the debounce avoids
 # reacting to half-rendered lines.
 PROMPT_DEBOUNCE_SECONDS = 0.5
+
+# --- Session environment ----------------------------------------------------
+#
+# NetworkManager starts this service with a bare environment, so gpauth - and
+# through it the SAML browser - has no way to reach the display server unless
+# we import these from the running session. Passing only DISPLAY=:0 (what we
+# used to do) is wrong on Wayland: the browser silently failed to open a window
+# for every browser except the wrapped Edge, which reconstructs the session
+# environment itself (issue #7).
+SESSION_ENV_KEYS = (
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "XAUTHORITY",
+    "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "XDG_SESSION_TYPE",
+    "XDG_CURRENT_DESKTOP",
+)
+
+# Processes whose environment describes the graphical session, most specific
+# first ("systemd" is the per-user manager and carries only a subset).
+SESSION_LEADER_PROCESSES = (
+    "gnome-shell",
+    "plasmashell",
+    "gnome-session-binary",
+    "kwin_wayland",
+    "xfce4-session",
+    "cinnamon-session",
+    "mate-session",
+    "sway",
+    "systemd",
+)
+
+# --- Browser resolution -----------------------------------------------------
+#
+# The wrapper fixes up the environment, the profile directory and the window
+# lifetime for the SAML browser (scripts/browser-wrapper.sh).
+BROWSER_WRAPPER = "/usr/libexec/gpclient/browser-wrapper"
+LEGACY_EDGE_WRAPPER = "/usr/libexec/gpclient/edge-wrapper"
+
+# Friendly browser names accepted in vpn.data, normalised for the wrapper
+BROWSER_ALIASES = {
+    "edge": "edge",
+    "msedge": "edge",
+    "microsoft-edge": "edge",
+    "chrome": "chrome",
+    "google-chrome": "chrome",
+    "chromium": "chromium",
+    "firefox": "firefox",
+    "default": "default",
+}
+
+# Concrete binaries the connection editors used to offer - wrapping them keeps
+# existing profiles working and fixes them at the same time
+WRAPPED_BROWSER_PATH_RE = re.compile(
+    r"^/usr/bin/(?:microsoft-edge\S*|google-chrome\S*|chromium\S*|firefox\S*)$"
+)
+
+# Fallback when the wrapper is missing (service upgraded, wrapper not yet
+# installed): let gpclient launch the browser directly
+BROWSER_BINARIES = {
+    "edge": ("/usr/bin/microsoft-edge",),
+    "chrome": ("google-chrome-stable", "google-chrome"),
+    "chromium": ("chromium", "chromium-browser"),
+    "firefox": ("firefox",),
+}
+
+# --- Gateway selection ------------------------------------------------------
+#
+# For a portal with more than one gateway, gpclient renders an inquire Select
+# frame of complete lines (every one terminated with \r\n, so - unlike a Text
+# prompt - nothing is left in the output tail):
+#
+#   ? Which gateway do you want to connect to?
+#   > gw-warsaw (gw1.example.com)
+#     gw-frankfurt (gw2.example.com)
+#   [↑↓ to move, enter to select, type to filter]
+#
+# We answer it ourselves: the gateway from vpn.data preferred-gateway, or the
+# first proposal when there is none. The list is cached in the connection
+# profile afterwards so the connection editor can offer it (issue #7).
+SELECT_HELP_RE = re.compile(r"^\[.*(?:to move|to select|to filter|↑↓).*\]$")
+SELECT_OPTION_MARKERS = ">^v "
+SELECT_FRAME_MAX_LINES = 24
+
+# Down wraps around in inquire (move_cursor_down(1, wrap=true)), so walking the
+# list with Down alone always terminates and reaches every entry - including
+# ones outside the visible page.
+KEY_DOWN = b"\x1b[B"
+KEY_ENTER = b"\r"
+SELECT_MAX_STEPS = 200
+SELECT_REDRAW_TIMEOUT = 1.5
+SELECT_POLL_INTERVAL = 0.05
+
+# Separator for the cached gateway list in vpn.data. Commas cannot be used:
+# `nmcli connection modify ... +vpn.data` splits key=value pairs on them.
+GATEWAY_LIST_SEPARATOR = ";"
+
+# gpclient logs the gateway it picked when it did not have to ask
+GATEWAY_CHOSEN_RE = re.compile(
+    r"Connecting to (?:the only available|the selected) gateway: (?P<gateway>.+?)\s*$"
+)
 
 # --- Interactive prompt detection -------------------------------------------
 #
@@ -179,6 +283,138 @@ def is_one_time_secret(text: str) -> bool:
     return any(word in lowered for word in ONE_TIME_SECRET_WORDS)
 
 
+def detect_select_prompt(lines: List[str]) -> Optional[Dict[str, Any]]:
+    """Detect an inquire Select frame (the gateway list) in the output lines.
+
+    Returns a dict with the question, the visible options in render order, the
+    index of the highlighted one and whether the list is longer than the page,
+    or None when the tail of the output is not a Select frame.
+
+    Works on raw (unstripped) lines: the one-character option marker is only
+    distinguishable from an option whose name starts with the same letter by
+    its position (marker, space, value).
+    """
+    frame = [line.rstrip() for line in lines if line.strip()]
+    if not frame or not SELECT_HELP_RE.match(frame[-1].strip()):
+        return None
+
+    window = frame[-SELECT_FRAME_MAX_LINES:-1]
+
+    prompt_index = None
+    for index in range(len(window) - 1, -1, -1):
+        if window[index].lstrip().startswith("?"):
+            prompt_index = index
+            break
+    if prompt_index is None:
+        return None
+
+    message = window[prompt_index].lstrip()[1:].strip()
+    options: List[str] = []
+    cursor = 0
+    more = False
+
+    for line in window[prompt_index + 1 :]:
+        if len(line) < 2 or line[0] not in SELECT_OPTION_MARKERS or line[1] != " ":
+            continue
+        marker, text = line[0], line[2:].strip()
+        if not text:
+            continue
+        if marker == ">":
+            cursor = len(options)
+        elif marker in "^v":
+            # Scroll marker: the list continues above/below the visible page
+            more = True
+        options.append(text)
+
+    if not message or not options:
+        return None
+
+    return {"message": message, "options": options, "cursor": cursor, "more": more}
+
+
+def pick_gateway(options: List[str], preferred: str) -> Optional[str]:
+    """Pick the option matching `preferred`, most specific match first.
+
+    Options look like "name (host.example.com)", so an exact match is tried
+    against the whole entry, then against the name and host parts separately,
+    and only then as a substring. Returns None when nothing matches.
+    """
+    wanted = (preferred or "").strip().lower()
+    if not wanted:
+        return options[0] if options else None
+
+    for option in options:
+        if option.strip().lower() == wanted:
+            return option
+
+    for option in options:
+        name, _, host = option.partition("(")
+        if name.strip().lower() == wanted or host.strip(") ").lower() == wanted:
+            return option
+
+    for option in options:
+        if wanted in option.strip().lower():
+            return option
+
+    return None
+
+
+def gateway_matches(preferred: str, option: str) -> bool:
+    """True when `option` ("name (host)") is what `preferred` asks for"""
+    wanted = (preferred or "").strip().lower()
+    if not wanted:
+        return False
+
+    candidate = option.strip().lower()
+    if wanted == candidate:
+        return True
+
+    name, _, host = option.partition("(")
+    if wanted == name.strip().lower() or wanted == host.strip(") ").lower():
+        return True
+
+    return wanted in candidate
+
+
+def resolve_browser(value: str) -> Tuple[str, Optional[str]]:
+    """Map the connection's `browser` setting to what gpclient should launch.
+
+    Returns (argument for gpclient --browser, GP_BROWSER for the wrapper).
+    Friendly names and the browser binaries our editors used to offer go
+    through the wrapper; anything else (a user's own wrapper script) is passed
+    through untouched.
+    """
+    value = (value or "").strip()
+
+    if value == LEGACY_EDGE_WRAPPER:
+        # Compatibility shim, it knows which browser to launch
+        return value, None
+
+    if not value:
+        target = "edge"  # historical default
+    elif value.lower() in BROWSER_ALIASES:
+        target = BROWSER_ALIASES[value.lower()]
+    elif WRAPPED_BROWSER_PATH_RE.match(value):
+        target = value
+    else:
+        return value, None
+
+    if os.path.exists(BROWSER_WRAPPER):
+        return BROWSER_WRAPPER, target
+
+    logger.warning(
+        f"{BROWSER_WRAPPER} is missing - letting gpclient launch the browser "
+        "directly (no session environment fixup, the auth window may not open)"
+    )
+    if target.startswith("/"):
+        return target, None
+    for candidate in BROWSER_BINARIES.get(target, ()):
+        path = candidate if candidate.startswith("/") else shutil.which(candidate)
+        if path and os.path.exists(path):
+            return path, None
+    return target, None
+
+
 class OutputScanner:
     """Split a raw PTY output stream into complete lines and a pending tail.
 
@@ -214,8 +450,17 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self.dns_domains = []
         self.gateway = None
         self.browser = None
+        self.browser_target = None  # GP_BROWSER passed to the wrapper
         self.hip_enabled = True  # HIP enabled by default
         self._state = NM_VPN_SERVICE_STATE_INIT
+
+        # Portal / gateway selection (issue #7)
+        self.as_gateway = False
+        self.preferred_gateway = ""
+        self._connection_uuid = ""
+        self._gateway_list: List[str] = []  # discovered during this attempt
+        self._stored_gateway_list = ""  # what the profile already has cached
+        self._answered_select = None  # message of the Select we answered
 
         # Routing configuration
         self.never_default = False
@@ -236,6 +481,9 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self._pty_master = None
         self._pty_transport = None
         self._output_scanner = OutputScanner()
+        # Recent complete output lines, used to recognise multi-line prompts
+        # (the inquire Select frame with the gateway list)
+        self._recent_lines: deque = deque(maxlen=96)
         self._auth_banner = None  # last "message (Portal: server)" banner
         self._prompt_task = None  # debounce task for prompt handling
         self._answering = False  # a prompt is currently being answered
@@ -334,6 +582,9 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self._answered_password = False
         self._login_failed = False
         self._output_scanner = OutputScanner()
+        self._recent_lines.clear()
+        self._answered_select = None
+        self._gateway_list = []
 
         try:
             # Extract VPN data
@@ -418,17 +669,37 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             if self.vpn_password:
                 logger.info("Stored password: <present>")
 
-            # Get gateway (required)
+            # Connection UUID, needed to cache the gateway list in the profile
+            connection_section = connection.get("connection", {})
+            uuid_raw = connection_section.get("uuid", "")
+            self._connection_uuid = (
+                uuid_raw[1] if isinstance(uuid_raw, tuple) else uuid_raw
+            ) or ""
+
+            # Get the server address (required). This is the portal address, or
+            # a gateway address when as-gateway is set.
             self.gateway = data_dict.get("gateway", "")
             if not self.gateway:
                 raise Exception("No gateway specified")
-            logger.info(f"Gateway: {self.gateway}")
+            logger.info(f"Server: {self.gateway}")
 
-            # Get browser (optional, default to edge-wrapper)
-            self.browser = data_dict.get(
-                "browser", "/usr/libexec/gpclient/edge-wrapper"
+            # Portal / gateway handling (issue #7)
+            self.as_gateway = data_dict.get("as-gateway", "false").lower() == "true"
+            self.preferred_gateway = data_dict.get("preferred-gateway", "").strip()
+            self._stored_gateway_list = data_dict.get("gateway-list", "").strip()
+            logger.info(f"Treat server as gateway: {self.as_gateway}")
+            logger.info(
+                "Preferred gateway: "
+                + (self.preferred_gateway or "<first proposed by the portal>")
             )
-            logger.info(f"Browser: {self.browser}")
+
+            # Get browser (optional). Friendly names and the known browser
+            # binaries go through our wrapper, which fixes up the session
+            # environment and the auth window lifetime.
+            self.browser, self.browser_target = resolve_browser(
+                data_dict.get("browser", "")
+            )
+            logger.info(f"Browser: {self.browser} (target: {self.browser_target})")
 
             # Get DNS servers (optional)
             dns_str = data_dict.get("dns", "")
@@ -557,6 +828,14 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self.hip_enabled = True
         self.never_default = False
         self.custom_routes = []
+        self.browser_target = None
+        self.as_gateway = False
+        self.preferred_gateway = ""
+        self._connection_uuid = ""
+        self._gateway_list = []
+        self._stored_gateway_list = ""
+        self._answered_select = None
+        self._recent_lines.clear()
         self.vpn_username = ""
         self.vpn_password = ""
         self._interactive = False
@@ -723,6 +1002,75 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         home = os.environ.get("HOME", f"/home/{username}")
         return uid, username, home
 
+    @staticmethod
+    def _read_proc_environ(pid: str) -> Dict[str, str]:
+        """Parse /proc/<pid>/environ into a dict (empty when unreadable)"""
+        try:
+            with open(f"/proc/{pid}/environ", "rb") as handle:
+                raw = handle.read()
+        except OSError:
+            return {}
+
+        environ = {}
+        for entry in raw.split(b"\0"):
+            if not entry or b"=" not in entry:
+                continue
+            key, _, value = entry.partition(b"=")
+            environ[key.decode("utf-8", errors="replace")] = value.decode(
+                "utf-8", errors="replace"
+            )
+        return environ
+
+    def _get_session_env(self, real_uid: int, real_home: str) -> Dict[str, str]:
+        """Collect the user's graphical session environment.
+
+        NetworkManager starts us without any session context, so the values are
+        read from the processes that own the session (SESSION_LEADER_PROCESSES,
+        most specific first). Only SESSION_ENV_KEYS are taken and the first
+        process that provides a key wins.
+        """
+        session_env: Dict[str, str] = {}
+
+        for process in SESSION_LEADER_PROCESSES:
+            if len(session_env) == len(SESSION_ENV_KEYS):
+                break
+            try:
+                result = subprocess.run(
+                    ["pgrep", "-u", str(real_uid), "-x", process],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+            except Exception as e:
+                logger.debug(f"pgrep for {process} failed: {e}")
+                continue
+            if result.returncode != 0:
+                continue
+
+            for pid in result.stdout.split():
+                proc_environ = self._read_proc_environ(pid)
+                for key in SESSION_ENV_KEYS:
+                    if key not in session_env and proc_environ.get(key):
+                        session_env[key] = proc_environ[key]
+                        logger.debug(f"Session {key} taken from {process} ({pid})")
+
+        # Fallbacks that don't need a session process
+        runtime_dir = session_env.get("XDG_RUNTIME_DIR") or f"/run/user/{real_uid}"
+        if os.path.isdir(runtime_dir):
+            session_env["XDG_RUNTIME_DIR"] = runtime_dir
+            bus_path = f"{runtime_dir}/bus"
+            if "DBUS_SESSION_BUS_ADDRESS" not in session_env and os.path.exists(
+                bus_path
+            ):
+                session_env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus_path}"
+
+        if "XAUTHORITY" not in session_env:
+            xauthority = f"{real_home}/.Xauthority"
+            if os.path.exists(xauthority):
+                session_env["XAUTHORITY"] = xauthority
+
+        return session_env
+
     async def _start_gpclient(self) -> bool:
         """Start gpclient process"""
         try:
@@ -741,7 +1089,14 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             except Exception as e:
                 logger.debug(f"No gpauth processes to kill: {e}")
 
-            # Build command - IMPORTANT: include --gateway to avoid TTY prompt
+            # Build command.
+            #
+            # NOTE: --gateway is deliberately NOT passed. It used to be set to
+            # the server address, which makes gpclient look that address up in
+            # the portal's gateway list and abort with "Cannot find gateway
+            # specified" for every real portal (issue #7). Instead we answer
+            # gpclient's gateway prompt ourselves, which also lets us fall back
+            # to the first proposal when the configured gateway is gone.
             cmd = [
                 "/usr/bin/gpclient",
                 "connect",
@@ -751,43 +1106,44 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             if self.hip_enabled:
                 cmd.append("--hip")
 
+            # The server is a gateway, not a portal: skip the portal workflow
+            # so the user is not authenticated twice
+            if self.as_gateway:
+                cmd.append("--as-gateway")
+
             # Pass stored username so standard-login portals don't prompt for it
             if self.vpn_username:
                 cmd.extend(["--user", self.vpn_username])
 
-            cmd.extend(
-                [
-                    "--browser",
-                    self.browser,
-                    "--gateway",
-                    self.gateway,
-                    self.gateway,
-                ]
-            )
+            cmd.extend(["--browser", self.browser, self.gateway])
 
             logger.info(f"Spawning: {' '.join(cmd)}")
 
             # Set up environment
             env = os.environ.copy()
 
-            # Set DISPLAY for browser
-            display = env.get("DISPLAY", ":0")
-            env["DISPLAY"] = display
-
             # Set SUDO_UID for gpclient to detect real user
             if real_uid > 0:
                 env["SUDO_UID"] = str(real_uid)
                 env["SUDO_USER"] = real_user
 
-                # Try to find XAUTHORITY
-                xauthority = env.get("XAUTHORITY")
-                if not xauthority:
-                    xauth_path = f"{real_home}/.Xauthority"
-                    if os.path.exists(xauth_path):
-                        env["XAUTHORITY"] = xauth_path
-                        logger.info(f"Set XAUTHORITY={xauth_path}")
+                # Import the user's graphical session environment so gpauth can
+                # actually open the SAML browser (issue #7)
+                session_env = self._get_session_env(real_uid, real_home)
+                env.update(session_env)
+                logger.info(
+                    f"Environment: SUDO_UID={real_uid}, session keys: "
+                    f"{sorted(session_env)}"
+                )
+                if "DISPLAY" not in session_env and "WAYLAND_DISPLAY" not in session_env:
+                    logger.warning(
+                        "No DISPLAY/WAYLAND_DISPLAY found in the user's session - "
+                        "the authentication browser may fail to open a window"
+                    )
 
-                logger.info(f"Environment: SUDO_UID={real_uid}, DISPLAY={display}")
+            # Tell the wrapper which browser to launch
+            if self.browser_target:
+                env["GP_BROWSER"] = self.browser_target
 
             env["GPCLIENT_NM_IGNORE_AUTO_ROUTES"] = (
                 "1" if self.ignore_auto_routes else "0"
@@ -895,13 +1251,29 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                 ):
                     self._last_answer = ""
 
-                for line in lines:
-                    line = line.strip()
+                for raw_line in lines:
+                    # Keep the raw line: the Select frame's option marker is
+                    # only recognisable by its position (marker, space, value)
+                    self._recent_lines.append(raw_line)
+
+                    line = raw_line.strip()
                     # inquire redraws lines on every keystroke; skip repeats
                     if line == last_logged_line:
                         continue
                     last_logged_line = line
                     logger.info(f"gpclient output: {line}")
+
+                    chosen = GATEWAY_CHOSEN_RE.search(line)
+                    if chosen:
+                        self._record_gateways([chosen.group("gateway")])
+
+                    if "--as-gateway" in line:
+                        logger.warning(
+                            "gpclient reports the server may be a gateway rather "
+                            "than a portal - enable 'Address is a gateway' "
+                            "(vpn.data as-gateway=true) in the connection "
+                            "settings to authenticate only once"
+                        )
 
                     banner = parse_auth_banner(line)
                     if banner:
@@ -954,12 +1326,34 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         check, so we only act on a prompt once the output has been stable for
         PROMPT_DEBOUNCE_SECONDS.
         """
+        # A prompt is already being answered (possibly waiting minutes for
+        # the user via SecretsRequired) - don't touch the task that answers it
+        if self._answering:
+            return
+
         if self._prompt_task and not self._prompt_task.done():
             self._prompt_task.cancel()
 
-        # A prompt is already being answered (possibly waiting minutes for
-        # the user via SecretsRequired) - don't detect it again
-        if self._answering:
+        # A list prompt (the gateway list) is a whole frame of complete lines,
+        # so it has to be checked before the tail-based text prompt detection -
+        # otherwise "? Which gateway do you want to connect to?" would be
+        # answered with the username.
+        select_frame = detect_select_prompt(list(self._recent_lines))
+        if select_frame is not None:
+            if select_frame["message"] == self._answered_select:
+                self._prompt_task = None
+                return
+
+            async def _debounced_select(line_count: int):
+                await asyncio.sleep(PROMPT_DEBOUNCE_SECONDS)
+                # Only act if no further output arrived (frame fully rendered)
+                if len(self._recent_lines) != line_count:
+                    return
+                await self._handle_select_prompt(select_frame)
+
+            self._prompt_task = asyncio.create_task(
+                _debounced_select(len(self._recent_lines))
+            )
             return
 
         label = detect_prompt(self._output_scanner.tail, self._last_answer)
@@ -1057,6 +1451,175 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
 
         self._write_answer(answer)
 
+    def _record_gateways(self, options: List[str]) -> None:
+        """Remember gateways seen during this attempt, for the profile cache"""
+        for option in options:
+            # ';' separates cached entries and nmcli splits +vpn.data values on
+            # commas, so neither may survive inside an entry
+            entry = option.replace(",", " ").replace(GATEWAY_LIST_SEPARATOR, " ")
+            entry = " ".join(entry.split())
+            if entry and entry not in self._gateway_list:
+                self._gateway_list.append(entry)
+
+    async def _handle_select_prompt(self, frame: Dict[str, Any]) -> None:
+        """Answer gpclient's gateway list without interrupting the user.
+
+        The gateway comes from vpn.data preferred-gateway; with none configured
+        (the default) the portal's first proposal wins. A configured gateway
+        that the portal no longer offers falls back to the first proposal - the
+        connection setting itself is left alone (issue #7).
+        """
+        options = frame["options"]
+        self._answered_select = frame["message"]
+        self._answering = True
+        try:
+            self._record_gateways(options)
+            logger.info(f"gpclient asks to choose: {frame['message']}")
+            logger.info(
+                f"Gateways offered: {options}"
+                + (" (list continues past the visible page)" if frame["more"] else "")
+            )
+
+            preferred = self.preferred_gateway
+            if not preferred:
+                wanted = options[0]
+                matches = lambda option: option == wanted  # noqa: E731
+                logger.info(
+                    f"No preferred gateway configured - taking the first "
+                    f"proposal: {wanted!r}"
+                )
+            else:
+                exact = None if frame["more"] else pick_gateway(options, preferred)
+                if exact is not None:
+                    wanted = exact
+                    matches = lambda option: option == wanted  # noqa: E731
+                    logger.info(f"Preferred gateway {preferred!r} matches {wanted!r}")
+                elif frame["more"]:
+                    # Cannot see the whole list yet - walk it looking for a match
+                    wanted = preferred
+                    matches = lambda option: gateway_matches(  # noqa: E731
+                        preferred, option
+                    )
+                    logger.info(
+                        f"Preferred gateway {preferred!r} is not on the visible "
+                        "page - walking the list"
+                    )
+                else:
+                    wanted = options[0]
+                    matches = lambda option: option == wanted  # noqa: E731
+                    logger.warning(
+                        f"Preferred gateway {preferred!r} is not offered by the "
+                        f"portal - falling back to the first proposal {wanted!r} "
+                        "(the connection setting is left unchanged)"
+                    )
+
+            start_option = options[frame["cursor"]]
+            current_frame = frame
+            steps = 0
+
+            while True:
+                self._record_gateways(current_frame["options"])
+                current = current_frame["options"][current_frame["cursor"]]
+
+                if matches(current):
+                    logger.info(f"Selecting gateway: {current!r}")
+                    self._write_keys(KEY_ENTER, f"select {current!r}")
+                    return
+
+                if steps and current == start_option:
+                    logger.warning(
+                        f"Walked the whole list without finding {wanted!r} - "
+                        f"selecting the first proposal {current!r}"
+                    )
+                    self._write_keys(KEY_ENTER, "select the first proposal")
+                    return
+
+                if steps >= SELECT_MAX_STEPS:
+                    logger.warning(
+                        f"Gave up after {steps} steps through the gateway list - "
+                        f"selecting {current!r}"
+                    )
+                    self._write_keys(KEY_ENTER, f"select {current!r}")
+                    return
+
+                next_frame = await self._press_list_down()
+                if next_frame is None:
+                    logger.warning(
+                        "gpclient stopped redrawing the gateway list - selecting "
+                        f"the highlighted entry {current!r}"
+                    )
+                    self._write_keys(KEY_ENTER, f"select {current!r}")
+                    return
+
+                current_frame = next_frame
+                steps += 1
+        finally:
+            self._answering = False
+
+    async def _press_list_down(self) -> Optional[Dict[str, Any]]:
+        """Move the list cursor one entry down, return the redrawn frame.
+
+        Down wraps around in inquire, so this reaches every entry, including
+        ones outside the visible page. None means gpclient did not redraw.
+        """
+        previous = detect_select_prompt(list(self._recent_lines))
+        previous_option = (
+            previous["options"][previous["cursor"]] if previous else None
+        )
+
+        self._write_keys(KEY_DOWN, "move down the gateway list")
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + SELECT_REDRAW_TIMEOUT
+        while loop.time() < deadline:
+            await asyncio.sleep(SELECT_POLL_INTERVAL)
+            frame = detect_select_prompt(list(self._recent_lines))
+            if frame is None:
+                continue
+            if frame["options"][frame["cursor"]] != previous_option:
+                return frame
+        return None
+
+    async def _persist_gateway_list(self) -> None:
+        """Cache the discovered gateway list in the connection profile.
+
+        The connection editors read vpn.data gateway-list to offer a gateway
+        drop-down; nothing in the connect path depends on it, so failures are
+        logged and otherwise ignored.
+        """
+        if not self._gateway_list or not self._connection_uuid:
+            return
+
+        value = GATEWAY_LIST_SEPARATOR.join(self._gateway_list)
+        if value == self._stored_gateway_list:
+            logger.debug("Gateway list unchanged, leaving the profile alone")
+            return
+
+        logger.info(f"Caching gateway list in the connection profile: {value}")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "nmcli",
+                "connection",
+                "modify",
+                self._connection_uuid,
+                "+vpn.data",
+                f"gateway-list={value}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        except Exception as e:
+            logger.warning(f"Could not cache the gateway list: {e}")
+            return
+
+        if proc.returncode == 0:
+            self._stored_gateway_list = value
+        else:
+            logger.warning(
+                f"Could not cache the gateway list: nmcli exited "
+                f"{proc.returncode}: {stderr.decode('utf-8', errors='replace').strip()}"
+            )
+
     async def _request_secret_interactive(
         self, secret_key: str, label: str, banner_msg: str
     ) -> str:
@@ -1114,16 +1677,20 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
 
     def _write_answer(self, answer: str) -> None:
         """Type an answer into gpclient's PTY"""
-        if self._pty_master is None:
-            logger.error("Cannot write answer: PTY is gone")
-            return
         self._last_answer = answer
+        # inquire (crossterm raw mode) treats \r as Enter
+        self._write_keys(answer.encode("utf-8") + KEY_ENTER, "answer")
+
+    def _write_keys(self, data: bytes, description: str) -> None:
+        """Send raw key bytes to gpclient's PTY"""
+        if self._pty_master is None:
+            logger.error(f"Cannot send {description}: PTY is gone")
+            return
         try:
-            # inquire (crossterm raw mode) treats \r as Enter
-            os.write(self._pty_master, answer.encode("utf-8") + b"\r")
-            logger.info("Answer written to gpclient")
+            os.write(self._pty_master, data)
+            logger.debug(f"Sent {description} to gpclient")
         except OSError as e:
-            logger.error(f"Failed to write answer to PTY: {e}")
+            logger.error(f"Failed to send {description} to PTY: {e}")
 
     def _fail_login(self, reason: str) -> None:
         """Emit a login failure and terminate gpclient"""
@@ -1399,6 +1966,10 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
 
                     # Emit state change: activated
                     self.StateChanged.emit(NM_VPN_SERVICE_STATE_STARTED)
+
+                    # The login succeeded, so the gateway list we saw is good -
+                    # cache it in the profile for the connection editor
+                    await self._persist_gateway_list()
 
                     # Stop checking
                     return
