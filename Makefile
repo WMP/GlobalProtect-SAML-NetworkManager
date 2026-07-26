@@ -51,6 +51,7 @@ install: all
 	# Install Python service
 	install -D -m 755 service/nm-gpclient-service.py /usr/lib/NetworkManager/nm-gpclient-service
 	# Install scripts
+	install -D -m 755 scripts/browser-wrapper.sh /usr/libexec/gpclient/browser-wrapper
 	install -D -m 755 scripts/edge-wrapper.sh /usr/libexec/gpclient/edge-wrapper
 	# Install auth dialog (interactive credentials/RSA token prompts)
 	install -D -m 755 auth-dialog/nm-gpclient-auth-dialog.py /usr/libexec/nm-gpclient-auth-dialog
@@ -109,6 +110,7 @@ install-dev: gnome-plugins
 	sudo install -m 755 service/nm-gpclient-service.py $(NM_LIB_DIR)/nm-gpclient-service
 
 	# Install helper scripts
+	sudo install -m 755 scripts/browser-wrapper.sh $(NM_LIBEXEC_DIR)/browser-wrapper
 	sudo install -m 755 scripts/edge-wrapper.sh $(NM_LIBEXEC_DIR)/edge-wrapper
 
 	# Install auth dialog (interactive credentials/RSA token prompts)

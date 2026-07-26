@@ -69,6 +69,8 @@ override_dh_auto_install:
 		$(CURDIR)/debian/network-manager-gpclient/usr/lib/NetworkManager/VPN/nm-gpclient-service.name
 	install -D -m 755 service/nm-gpclient-service.py \
 		$(CURDIR)/debian/network-manager-gpclient/usr/lib/NetworkManager/nm-gpclient-service
+	install -D -m 755 scripts/browser-wrapper.sh \
+		$(CURDIR)/debian/network-manager-gpclient/usr/libexec/gpclient/browser-wrapper
 	install -D -m 755 scripts/edge-wrapper.sh \
 		$(CURDIR)/debian/network-manager-gpclient/usr/libexec/gpclient/edge-wrapper
 

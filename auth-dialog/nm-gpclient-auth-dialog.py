@@ -191,8 +191,27 @@ def main():
     requested, message = parse_hints(args.hint)
 
     if not requested:
-        # Upfront secrets request (NeedSecrets returned "vpn"):
-        # only the password is stored as a secret.
+        # No hints: NetworkManager wants the connection's stored secrets, not
+        # an answer to a challenge from the VPN service.
+        #
+        # SAML connections (the default) have no stored secrets at all - the
+        # browser does the authentication. Exiting non-zero here is reported
+        # to NetworkManager as "user canceled the secrets request", which is
+        # what kept the connection editor spinning until the 25 s secrets
+        # timeout expired (issue #8). Answer with an empty set instead.
+        if data.get("auth-mode", "saml") != "credentials":
+            output_secrets({})
+            wait_for_quit()
+            return 0
+
+        # Standard login portal, but the password is explicitly not required
+        # (password-flags: 4 = NOT_REQUIRED).
+        if data.get("password-flags", "0") == "4":
+            output_secrets({})
+            wait_for_quit()
+            return 0
+
+        # Standard login portal: only the password is stored as a secret.
         requested = ["password"]
 
     # If we already have every requested secret and don't need to re-ask,
