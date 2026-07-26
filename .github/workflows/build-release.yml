@@ -56,6 +56,13 @@ jobs:
             bash -c "
               set -e
               cp debian/control.ubuntu${{ matrix.ubuntu }} debian/control
+              # Tag the version with the release codename (1.4.0-1~noble1) so the
+              # same version never means different binaries and apt sees a reason
+              # to reinstall after a distribution upgrade. The apt repository
+              # derives the suite from this suffix (.github/scripts/build-apt-repo.sh).
+              . /etc/os-release
+              sed -i \"1s/(\\([^)]*\\))/(\\1~\${VERSION_CODENAME}1)/\" debian/changelog
+              echo \"Building version \$(dpkg-parsechangelog -S Version) for \$VERSION_CODENAME\"
               dpkg-buildpackage -us -uc -b
               cp /build/*.deb /build/*.ddeb /output/ 2>/dev/null || cp /build/*.deb /output/
             "
@@ -86,20 +93,13 @@ jobs:
         with:
           path: artifacts
 
-      - name: Prepare release files with unique names
+      - name: Collect release files
         run: |
+          # Filenames already carry the release codename in the version
+          # (network-manager-gpclient_1.4.0-1~noble1_amd64.deb), so no renaming
+          # is needed to keep them unique across the three Ubuntu builds.
           mkdir -p release-files
-          for dir in artifacts/debs-ubuntu-*/; do
-            ubuntu_version=$(basename "$dir" | sed 's/debs-ubuntu-//')
-            for file in "$dir"*.deb; do
-              if [ -f "$file" ]; then
-                filename=$(basename "$file")
-                # Insert ubuntu version before .deb extension
-                new_name="${filename%.deb}_ubuntu${ubuntu_version}.deb"
-                cp "$file" "release-files/$new_name"
-              fi
-            done
-          done
+          find artifacts -name '*.deb' -exec cp {} release-files/ \;
           echo "Release files:"
           ls -la release-files/
 
@@ -109,3 +109,13 @@ jobs:
           files: release-files/*.deb
           generate_release_notes: true
           fail_on_unmatched_files: true
+
+  publish-apt:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/publish-apt.yml
+    secrets: inherit

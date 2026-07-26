@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GlobalProtect NetworkManager plugin &mdash; apt repository</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.6;
+    max-width: 46rem;
+    margin: 0 auto;
+    padding: 2rem 1.25rem 4rem;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
+  .sub { opacity: 0.75; margin-top: 0; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; }
+  pre {
+    background: rgba(127, 127, 127, 0.12);
+    padding: 0.9rem 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+  }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+  table { border-collapse: collapse; margin-top: 0.5rem; }
+  th, td { text-align: left; padding: 0.35rem 1.25rem 0.35rem 0; }
+  th { border-bottom: 1px solid rgba(127, 127, 127, 0.4); }
+  footer { margin-top: 3rem; font-size: 0.85rem; opacity: 0.7; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+
+<h1>GlobalProtect VPN plugin for NetworkManager</h1>
+<p class="sub">apt repository for Ubuntu &mdash; SAML/SSO GlobalProtect connections in GNOME&nbsp;Settings and KDE&nbsp;Plasma.</p>
+
+<h2>Install</h2>
+
+<pre><code>curl -fsSL https://wmp.github.io/GlobalProtect-SAML-NetworkManager/gpclient-archive-keyring.gpg \
+  | sudo tee /usr/share/keyrings/gpclient-archive-keyring.gpg &gt; /dev/null
+
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/gpclient-archive-keyring.gpg] \
+https://wmp.github.io/GlobalProtect-SAML-NetworkManager $(lsb_release -cs) main" \
+  | sudo tee /etc/apt/sources.list.d/gpclient.list
+
+sudo apt update
+sudo apt install network-manager-gpclient-gnome    # GNOME, MATE, Cinnamon, XFCE
+# or
+sudo apt install network-manager-gpclient-plasma   # KDE Plasma</code></pre>
+
+<p>Then add the VPN in your desktop's network settings: <em>Add VPN &rarr; GlobalProtect</em>,
+enter the portal address, connect.</p>
+
+<h2>Available releases</h2>
+
+<table>
+  <tr><th>Ubuntu</th><th>Version</th></tr>
+  __VERSION_ROWS__
+</table>
+
+<p>Architecture: <code>amd64</code> only.</p>
+
+<h2>Uninstall</h2>
+
+<pre><code>sudo apt remove network-manager-gpclient network-manager-gpclient-gnome network-manager-gpclient-plasma
+sudo rm /etc/apt/sources.list.d/gpclient.list /usr/share/keyrings/gpclient-archive-keyring.gpg
+sudo apt update</code></pre>
+
+<h2>Signing key</h2>
+
+<p>Packages and indexes are signed with:</p>
+<pre><code>__FINGERPRINT__</code></pre>
+<p>The key is used for signing this repository only.</p>
+
+<footer>
+  <a href="https://github.com/WMP/GlobalProtect-SAML-NetworkManager">Source, issues and documentation on GitHub</a>
+  &middot; <a href="https://github.com/WMP/GlobalProtect-SAML-NetworkManager/blob/main/docs/APT_REPO.md">how this repository works</a>
+  &middot; rebuilt __UPDATED__
+</footer>
+
+</body>
+</html>

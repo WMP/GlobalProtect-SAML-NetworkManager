@@ -18,23 +18,47 @@ NetworkManager VPN plugin for GlobalProtect (Palo Alto Networks) with SAML/SSO a
 
 ## Installation
 
-Download `.deb` packages from [GitHub Releases](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/releases) for your Ubuntu version (22.04, 24.04 or 26.04).
+Add the apt repository and install - dependencies, upgrades and the GNOME/Plasma
+choice are handled by apt:
 
-Install two packages:
-1. **network-manager-gpclient** - core package (required)
-2. **network-manager-gpclient-gnome** - for GNOME/GTK desktops, or
-   **network-manager-gpclient-plasma** - for KDE Plasma
+```bash
+curl -fsSL https://wmp.github.io/GlobalProtect-SAML-NetworkManager/gpclient-archive-keyring.gpg \
+  | sudo tee /usr/share/keyrings/gpclient-archive-keyring.gpg > /dev/null
 
-**Ubuntu 22.04 only:** Install python3-sdbus via pip before installing packages (not available in apt):
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/gpclient-archive-keyring.gpg] https://wmp.github.io/GlobalProtect-SAML-NetworkManager $(lsb_release -cs) main" \
+  | sudo tee /etc/apt/sources.list.d/gpclient.list
+
+sudo apt update
+sudo apt install network-manager-gpclient-gnome    # GNOME, MATE, Cinnamon, XFCE
+# or
+sudo apt install network-manager-gpclient-plasma   # KDE Plasma
+```
+
+Supported: Ubuntu 22.04, 24.04 and 26.04, `amd64`. Details, deb822 format and
+removal instructions: [docs/APT_REPO.md](docs/APT_REPO.md).
+
+**Ubuntu 22.04 only:** `python3-sdbus` is not in apt, install it with pip first:
 ```bash
 pip3 install sdbus
 ```
 
-Then install the packages:
+<details>
+<summary>Alternative: individual .deb files</summary>
+
+Download the packages for your Ubuntu version from
+[GitHub Releases](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/releases).
+You need **network-manager-gpclient** plus either
+**network-manager-gpclient-gnome** or **network-manager-gpclient-plasma**, and
+the GUI package requires exactly the same version of the core package - so
+install them in one go and let apt sort out the dependencies:
+
 ```bash
-sudo dpkg -i <downloaded-packages>.deb
-sudo apt-get install -f  # install dependencies
+sudo apt install ./network-manager-gpclient_*.deb ./network-manager-gpclient-gnome_*.deb
 ```
+
+`dpkg -i` on a single file fails on purpose here; use `apt install ./file.deb`
+(or the repository above).
+</details>
 
 ### Migrating from `globalprotect-openconnect`
 
@@ -47,15 +71,10 @@ sudo apt remove globalprotect-openconnect
 sudo apt autoremove
 ```
 
-Make sure the runtime prerequisites are present before `dpkg -i`
-(this skips the `apt -f install` round-trip):
-
-```bash
-sudo apt install openconnect python3-sdbus vpnc-scripts
-```
-
-On Ubuntu 22.04 `python3-sdbus` is not in apt — use the `pip3 install sdbus`
-step shown above instead.
+Installing from the apt repository pulls the runtime prerequisites
+(`openconnect`, `python3-sdbus`, `vpnc-scripts`) in by itself. On Ubuntu 22.04
+`python3-sdbus` is not in apt — use the `pip3 install sdbus` step shown above
+instead.
 
 Thanks to @ottuzzi for the writeup
 ([#3](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/issues/3)).
@@ -114,6 +133,9 @@ nmcli connection up "GlobalProtect VPN"
 │   ├── gnome/                  # GNOME/GTK plugins (C)
 │   └── plasma/                 # KDE Plasma plugin (C++/Qt)
 ├── config/                     # NetworkManager & systemd configuration
+├── .github/
+│   ├── scripts/                # build-apt-repo.sh (apt repository builder)
+│   └── workflows/              # build/release and Pages publishing
 ├── scripts/                    # Helper scripts (edge-wrapper)
 ├── external/
 │   └── GlobalProtect-openconnect/  # VPN client (submodule)
@@ -217,6 +239,7 @@ Debug logs are written to `/tmp/vpnc-script2.log`.
 ## Documentation
 
 - [docs/README.md](docs/README.md) - Full documentation
+- [docs/APT_REPO.md](docs/APT_REPO.md) - apt repository: using it, releasing, key rotation
 - [docs/EDGE_WRAPPER.md](docs/EDGE_WRAPPER.md) - Edge wrapper and browser integration
 - [docs/PYTHON_SERVICE.md](docs/PYTHON_SERVICE.md) - Service implementation details
 - [docs/GNOME_SETTINGS_INTEGRATION.md](docs/GNOME_SETTINGS_INTEGRATION.md) - GNOME integration
