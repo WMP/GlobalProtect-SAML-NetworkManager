@@ -66,8 +66,15 @@ Thanks to @ottuzzi for the writeup
 
 1. Open GNOME Settings → Network or KDE Network Settings
 2. Add VPN → GlobalProtect
-3. Enter gateway URL (e.g. `vpn.example.com`)
-4. Connect - browser will open for SAML authentication
+3. Enter the portal address (e.g. `vpn.example.com`)
+4. Connect - a browser opens for SAML authentication
+
+If your organisation gave you a *gateway* address rather than a portal
+address, also tick **Address is a gateway (skip the portal)**.
+
+When the portal offers several gateways, the first one it proposes is used
+automatically; after the first successful connection the full list appears
+in the **Preferred gateway** drop-down, so you can pin a different one.
 
 Portals that use a standard login (username/password) or an RSA SecurID
 token instead of SAML are supported too - the plugin asks for the
@@ -79,6 +86,27 @@ storing the username/password in the connection.
 # Or via command line
 nmcli connection up "GlobalProtect VPN"
 ```
+
+### Connection settings
+
+Everything the editors show lives in the connection's `vpn.data`, so it can
+also be set with `nmcli connection modify "My VPN" +vpn.data key=value`:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `gateway` | (required) | Portal address, or gateway address with `as-gateway=true` |
+| `as-gateway` | `false` | The address is a gateway - skip the portal workflow |
+| `preferred-gateway` | (empty) | Gateway to use; empty means the portal's first proposal. Falls back to the first proposal when the value is not offered |
+| `gateway-list` | (written by the service) | Gateways seen during the last successful connection, `;`-separated. Read by the editors to fill the drop-down |
+| `auth-mode` | `saml` | `saml` = browser login, `credentials` = username/password collected upfront |
+| `username` | (empty) | Username for portals that ask on the terminal |
+| `browser` | `edge` | `edge`, `firefox`, `chrome`, `chromium`, `default`, or a path to your own wrapper ([details](docs/EDGE_WRAPPER.md#alternative-browsers)) |
+| `hip` | `true` | Send the HIP (Host Integrity Protection) report |
+| `dns` | (empty) | Override VPN DNS servers, `;`-separated. Empty keeps automatic split DNS |
+| `dns-domains` | (empty) | Extra search domains, space-separated |
+
+The password for `auth-mode=credentials` is a secret, not data:
+`nmcli connection modify "My VPN" +vpn.secrets password=...`
 
 ## Packages
 
@@ -122,7 +150,7 @@ nmcli connection up "GlobalProtect VPN"
 │   ├── gnome/                  # GNOME/GTK plugins (C)
 │   └── plasma/                 # KDE Plasma plugin (C++/Qt)
 ├── config/                     # NetworkManager & systemd configuration
-├── scripts/                    # Helper scripts (edge-wrapper)
+├── scripts/                    # Helper scripts (browser-wrapper)
 ├── external/
 │   └── GlobalProtect-openconnect/  # VPN client (submodule)
 └── debian/                     # Debian packaging
@@ -210,6 +238,24 @@ That error on its own does **not** mean the VPN is broken — it just
 means the service is already running. The actual error from a failing
 VPN connect will be in `journalctl -u nm-gpclient`.
 
+### The authentication browser does not open, or closes too early
+
+```bash
+# The wrapper logs every launch and always says why it finished
+grep -E "done:|WARNING|ERROR" /tmp/edge-wrapper-$(id -u).log
+
+# Try the browser on its own - the window must open and stay open
+GP_BROWSER=firefox /usr/libexec/gpclient/browser-wrapper "https://example.com"
+```
+
+The service log shows which session variables it found for the browser:
+
+```bash
+sudo journalctl -u nm-gpclient | grep "session keys"
+```
+
+More in [docs/EDGE_WRAPPER.md](docs/EDGE_WRAPPER.md#troubleshooting).
+
 ### Debug vpnc-script
 
 The repository includes a modified `vpnc-script` (from Ubuntu 24.04 `vpnc-scripts` package) with added debug logging. This script is **not installed** by the package - you need to download it manually from the repository:
@@ -225,9 +271,9 @@ Debug logs are written to `/tmp/vpnc-script2.log`.
 ## Documentation
 
 - [docs/README.md](docs/README.md) - Full documentation
-- [docs/EDGE_WRAPPER.md](docs/EDGE_WRAPPER.md) - Edge wrapper and browser integration
+- [docs/EDGE_WRAPPER.md](docs/EDGE_WRAPPER.md) - Browser wrapper and browser integration
 - [docs/PYTHON_SERVICE.md](docs/PYTHON_SERVICE.md) - Service implementation details
-- [docs/INTERACTIVE_AUTH.md](docs/INTERACTIVE_AUTH.md) - Standard login / RSA token / OTP authentication
+- [docs/INTERACTIVE_AUTH.md](docs/INTERACTIVE_AUTH.md) - Standard login / RSA token / OTP authentication, gateway selection
 - [docs/GNOME_SETTINGS_INTEGRATION.md](docs/GNOME_SETTINGS_INTEGRATION.md) - GNOME integration
 - [docs/PLASMA_IMPLEMENTATION.md](docs/PLASMA_IMPLEMENTATION.md) - Plasma plugin details
 

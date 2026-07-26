@@ -84,6 +84,60 @@ password is only requested mid-connection when gpclient actually asks.
 Nothing changes — `auth-mode` defaults to `saml` and authentication happens
 in the browser as before.
 
+## Gateway selection
+
+A portal usually offers several gateways and `gpclient` asks which one to use,
+again on its terminal:
+
+```
+? Which gateway do you want to connect to?
+> gw-warsaw (gw1.example.com)
+  gw-frankfurt (gw2.example.com)
+[↑↓ to move, enter to select, type to filter]
+```
+
+The service answers this **without asking the user**:
+
+1. With `preferred-gateway` set in `vpn.data`, the matching entry is selected.
+   The value is matched against the whole entry, then the name and the host
+   part, then as a substring - so both `gw-frankfurt` and `gw2.example.com`
+   work.
+2. With no `preferred-gateway` (the default), the portal's first proposal wins.
+   gpclient sorts the list by region, so this is the gateway it would have
+   picked itself.
+3. If a configured gateway is not offered any more, the first proposal is used
+   and a warning is logged. The setting is left untouched - the portal may just
+   have changed temporarily.
+
+After a successful connection the discovered list is cached in the profile
+(`vpn.data gateway-list`, entries separated by `;`), and the connection editors
+offer it as a drop-down for **Preferred gateway**. The first entry of that
+drop-down, *First proposed by portal (automatic)*, stores nothing.
+
+```bash
+# Pick a specific gateway from the command line
+nmcli connection modify "My VPN" +vpn.data preferred-gateway="gw-frankfurt"
+
+# Back to automatic
+nmcli connection modify "My VPN" -vpn.data preferred-gateway
+
+# See what the last successful connection discovered
+nmcli -g vpn.data connection show "My VPN"
+```
+
+`--gateway` is deliberately never passed to `gpclient`: it makes gpclient abort
+with `Cannot find gateway specified` when the value is unknown, which would
+remove any chance of falling back
+([issue #7](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/issues/7)).
+
+### Portal or gateway address?
+
+The address in the connection is normally a **portal**. If your organisation
+gave you a gateway address instead, tick *Address is a gateway (skip the
+portal)* (`vpn.data as-gateway=true`) - otherwise the portal workflow is tried
+first and you may end up authenticating twice. When gpclient itself notices
+this, the service logs a hint saying so.
+
 ## Desktop support
 
 - **GNOME / nm-applet**: the plugin installs
@@ -101,3 +155,7 @@ in the browser as before.
 
 The user has 300 s to answer an interactive secrets request; afterwards the
 connection fails with `LOGIN_FAILED`.
+
+The browser window for SAML authentication has its own, separate timeout
+(`GP_AUTH_TIMEOUT`, 300 s by default) - see
+[EDGE_WRAPPER.md](EDGE_WRAPPER.md#environment-variables).
