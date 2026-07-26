@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>400</width>
-    <height>150</height>
+    <width>460</width>
+    <height>300</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -23,46 +23,111 @@
    <item row="0" column="0">
     <widget class="QLabel" name="gatewayLabel">
      <property name="text">
-      <string>Gateway:</string>
+      <string>Portal or gateway address:</string>
      </property>
     </widget>
    </item>
    <item row="0" column="1">
     <widget class="QLineEdit" name="gatewayLineEdit">
      <property name="toolTip">
-      <string>VPN server hostname or IP address (e.g., vpn.company.com)</string>
+      <string>Address of the GlobalProtect portal (e.g. vpn.company.com).
+If your organisation gave you a gateway address instead, also tick "Address is a gateway" below.</string>
      </property>
      <property name="placeholderText">
       <string>vpn.company.com</string>
      </property>
     </widget>
    </item>
-   <item row="1" column="0">
+   <item row="1" column="1">
+    <widget class="QCheckBox" name="asGatewayCheckBox">
+     <property name="text">
+      <string>Address is a gateway (skip the portal)</string>
+     </property>
+     <property name="toolTip">
+      <string>Enable when the address above is a gateway rather than a portal.
+Without this the portal workflow is tried first, which can make you authenticate twice.</string>
+     </property>
+    </widget>
+   </item>
+   <item row="2" column="0">
+    <widget class="QLabel" name="preferredGatewayLabel">
+     <property name="text">
+      <string>Preferred gateway:</string>
+     </property>
+    </widget>
+   </item>
+   <item row="2" column="1">
+    <widget class="QComboBox" name="preferredGatewayComboBox">
+     <property name="editable">
+      <bool>true</bool>
+     </property>
+     <property name="toolTip">
+      <string>Which gateway to connect to. The list is filled in after the first successful connection.
+If the chosen gateway is not offered by the portal any more, the first proposal is used instead.</string>
+     </property>
+     <!-- Items are added programmatically from the cached gateway list -->
+    </widget>
+   </item>
+   <item row="3" column="0">
+    <widget class="QLabel" name="authModeLabel">
+     <property name="text">
+      <string>Authentication:</string>
+     </property>
+    </widget>
+   </item>
+   <item row="3" column="1">
+    <widget class="QComboBox" name="authModeComboBox">
+     <property name="toolTip">
+      <string>Browser: the portal opens a browser window for single sign-on (default).
+Username and password: the portal asks on the terminal - the credentials and any token are requested in a dialog instead.</string>
+     </property>
+     <!-- Items are added programmatically (saml / credentials) -->
+    </widget>
+   </item>
+   <item row="4" column="0">
+    <widget class="QLabel" name="usernameLabel">
+     <property name="text">
+      <string>Username:</string>
+     </property>
+    </widget>
+   </item>
+   <item row="4" column="1">
+    <widget class="QLineEdit" name="usernameLineEdit">
+     <property name="toolTip">
+      <string>Optional. Used by portals that ask for credentials on the terminal, so you are not asked for the username every time.</string>
+     </property>
+     <property name="placeholderText">
+      <string>Optional</string>
+     </property>
+    </widget>
+   </item>
+   <item row="5" column="0">
     <widget class="QLabel" name="browserLabel">
      <property name="text">
       <string>Browser:</string>
      </property>
     </widget>
    </item>
-   <item row="1" column="1">
+   <item row="5" column="1">
     <widget class="QComboBox" name="browserComboBox">
      <property name="editable">
       <bool>true</bool>
      </property>
      <property name="toolTip">
-      <string>Browser for 2FA/SAML authentication. Select 'Custom...' to specify your own executable.</string>
+      <string>Browser used for SAML/2FA authentication. "edge" is the best tested option; "default" uses your desktop's default browser.
+Select 'Custom...' to give the full path to your own executable.</string>
      </property>
-     <!-- Browser items are added programmatically in constructor to check file existence -->
+     <!-- Browser items are added programmatically in the constructor -->
     </widget>
    </item>
-   <item row="2" column="0">
+   <item row="6" column="0">
     <widget class="QLabel" name="dnsLabel">
      <property name="text">
       <string>DNS Servers:</string>
      </property>
     </widget>
    </item>
-   <item row="2" column="1">
+   <item row="6" column="1">
     <widget class="QLineEdit" name="dnsLineEdit">
      <property name="toolTip">
       <string>Recommended: Leave empty to use DNS servers from VPN with automatic split DNS configuration.
@@ -74,14 +139,14 @@ Override: Enter semicolon-separated DNS servers (e.g., 8.8.8.8;8.8.4.4) to use c
      </property>
     </widget>
    </item>
-   <item row="3" column="0">
+   <item row="7" column="0">
     <widget class="QLabel" name="hipLabel">
      <property name="text">
       <string>HIP:</string>
      </property>
     </widget>
    </item>
-   <item row="3" column="1">
+   <item row="7" column="1">
     <widget class="QCheckBox" name="hipCheckBox">
      <property name="text">
       <string>Enable Host Integrity Protection (HIP)</string>
