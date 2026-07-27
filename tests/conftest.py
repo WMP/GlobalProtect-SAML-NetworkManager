@@ -109,4 +109,8 @@ def pytest_runtest_makereport(item, call):
     rep = outcome.get_result()
 
     if rep.when == "call" and rep.failed:
-        take_screenshot_on_failure(item.name)
+        # Never let the screenshot get in the way of reporting the failure
+        try:
+            take_screenshot_on_failure(item.name)
+        except Exception as e:  # noqa: BLE001 - diagnostics must not mask failures
+            print(f"Screenshot for {item.name} failed: {e}")

@@ -146,6 +146,22 @@ Override: Enter semicolon-separated DNS servers (e.g., 8.8.8.8;8.8.4.4) to use c
      </property>
     </widget>
    </item>
+   <item row="8" column="0">
+    <widget class="QLabel" name="fixOpensslLabel">
+     <property name="text">
+      <string>Legacy TLS renegotiation:</string>
+     </property>
+    </widget>
+   </item>
+   <item row="8" column="1">
+    <widget class="QComboBox" name="fixOpensslComboBox">
+     <property name="toolTip">
+      <string>Portals with an old TLS stack need renegotiation that OpenSSL 3 refuses by default.
+Automatic: retry once with the workaround when the portal asks for it, and switch this setting to "Always on" afterwards, so the failed first attempt does not repeat.</string>
+     </property>
+     <!-- Items are added programmatically (auto / true / false) -->
+    </widget>
+   </item>
    <item row="7" column="1">
     <widget class="QCheckBox" name="hipCheckBox">
      <property name="text">

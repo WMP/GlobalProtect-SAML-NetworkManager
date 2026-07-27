@@ -120,6 +120,7 @@ also be set with `nmcli connection modify "My VPN" +vpn.data key=value`:
 | `auth-mode` | `saml` | `saml` = browser login, `credentials` = username/password collected upfront |
 | `username` | (empty) | Username for portals that ask on the terminal |
 | `browser` | `edge` | `edge`, `firefox`, `chrome`, `chromium`, `default`, or a path to your own wrapper ([details](docs/EDGE_WRAPPER.md#alternative-browsers)) |
+| `fix-openssl` | `auto` | Legacy TLS renegotiation for portals with an old TLS stack. `auto` retries once when the portal needs it and then stores `true` in the profile; `true` uses it from the start; `false` never does |
 | `hip` | `true` | Send the HIP (Host Integrity Protection) report |
 | `dns` | (empty) | Override VPN DNS servers, `;`-separated. Empty keeps automatic split DNS |
 | `dns-domains` | (empty) | Extra search domains, space-separated |
@@ -259,6 +260,22 @@ sudo /usr/lib/NetworkManager/nm-gpclient-service --debug
 That error on its own does **not** mean the VPN is broken — it just
 means the service is already running. The actual error from a failing
 VPN connect will be in `journalctl -u nm-gpclient`.
+
+### The VPN fails immediately with an SSL error
+
+```
+error:0A000152:SSL routines:final_renegotiate:unsafe legacy renegotiation disabled
+```
+
+The portal's TLS stack needs renegotiation that OpenSSL 3 refuses by default, so
+the connection dies before any browser can open. The service notices this, and
+retries once with gpclient's `--fix-openssl` workaround, then records it in the
+profile (**Legacy TLS renegotiation: Always on** in the editor) so the failed
+first attempt does not repeat. To set it up front, or to turn it off:
+
+```bash
+nmcli connection modify "My VPN" +vpn.data fix-openssl=true    # or false
+```
 
 ### The authentication browser does not open, or closes too early
 

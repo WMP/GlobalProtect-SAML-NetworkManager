@@ -22,6 +22,7 @@ struct _NMGpclientEditor {
     GtkComboBoxText *browser_combo;
     GtkEntry *dns_entry;
     GtkCheckButton *hip_check;
+    GtkComboBoxText *fix_openssl_combo;
 };
 
 /* First entry of the preferred-gateway combo: let the portal decide. Stored as
@@ -242,6 +243,36 @@ build_ui (NMGpclientEditor *self)
     g_signal_connect (G_OBJECT (self->browser_combo), "changed", G_CALLBACK (browser_combo_changed_cb), self);
     gtk_grid_attach (GTK_GRID (widget), GTK_WIDGET (self->browser_combo), 1, row++, 1, 1);
 
+    /* Legacy TLS renegotiation workaround */
+    label = gtk_label_new ("Legacy TLS renegotiation:");
+    gtk_widget_set_halign (label, GTK_ALIGN_START);
+    gtk_grid_attach (GTK_GRID (widget), label, 0, row, 1, 1);
+
+    self->fix_openssl_combo = GTK_COMBO_BOX_TEXT (gtk_combo_box_text_new ());
+    gtk_widget_set_hexpand (GTK_WIDGET (self->fix_openssl_combo), TRUE);
+    gtk_combo_box_text_append_text (self->fix_openssl_combo, "Automatic (enable when the portal needs it)");
+    gtk_combo_box_text_append_text (self->fix_openssl_combo, "Always on");
+    gtk_combo_box_text_append_text (self->fix_openssl_combo, "Never");
+    gtk_widget_set_tooltip_text (GTK_WIDGET (self->fix_openssl_combo),
+        "Portals with an old TLS stack need renegotiation that OpenSSL 3 refuses "
+        "by default.\n"
+        "Automatic: retry once with the workaround when the portal asks for it, "
+        "and switch this setting to \"Always on\" afterwards, so the failed first "
+        "attempt does not repeat.");
+    if (s_vpn) {
+        value = nm_setting_vpn_get_data_item (s_vpn, "fix-openssl");
+        if (g_strcmp0 (value, "true") == 0)
+            gtk_combo_box_set_active (GTK_COMBO_BOX (self->fix_openssl_combo), 1);
+        else if (g_strcmp0 (value, "false") == 0)
+            gtk_combo_box_set_active (GTK_COMBO_BOX (self->fix_openssl_combo), 2);
+        else
+            gtk_combo_box_set_active (GTK_COMBO_BOX (self->fix_openssl_combo), 0);
+    } else {
+        gtk_combo_box_set_active (GTK_COMBO_BOX (self->fix_openssl_combo), 0);
+    }
+    g_signal_connect (G_OBJECT (self->fix_openssl_combo), "changed", G_CALLBACK (stuff_changed_cb), self);
+    gtk_grid_attach (GTK_GRID (widget), GTK_WIDGET (self->fix_openssl_combo), 1, row++, 1, 1);
+
     /* DNS */
     label = gtk_label_new ("DNS Servers:");
     gtk_widget_set_halign (label, GTK_ALIGN_START);
@@ -369,6 +400,22 @@ update_connection (NMVpnEditor *iface,
             nm_setting_vpn_add_data_item (s_vpn, "dns", str);
     }
 
+    if (self->fix_openssl_combo) {
+        /* Automatic stores nothing - the service reads a missing key as "auto"
+         * and switches the profile to "true" once a portal needs it. */
+        switch (gtk_combo_box_get_active (GTK_COMBO_BOX (self->fix_openssl_combo))) {
+        case 1:
+            nm_setting_vpn_add_data_item (s_vpn, "fix-openssl", "true");
+            break;
+        case 2:
+            nm_setting_vpn_add_data_item (s_vpn, "fix-openssl", "false");
+            break;
+        default:
+            nm_setting_vpn_remove_data_item (s_vpn, "fix-openssl");
+            break;
+        }
+    }
+
     if (self->hip_check) {
         if (gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON (self->hip_check)))
             nm_setting_vpn_add_data_item (s_vpn, "hip", "true");
@@ -438,6 +485,7 @@ nm_gpclient_editor_init (NMGpclientEditor *self)
     self->browser_combo = NULL;
     self->dns_entry = NULL;
     self->hip_check = NULL;
+    self->fix_openssl_combo = NULL;
 }
 
 NMGpclientEditor *

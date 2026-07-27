@@ -42,6 +42,10 @@ GpclientWidget::GpclientWidget(const NetworkManager::VpnSetting::Ptr &setting, Q
 
     m_ui->preferredGatewayComboBox->addItem(gatewayAutoLabel);
 
+    m_ui->fixOpensslComboBox->addItem(QStringLiteral("Automatic (enable when the portal needs it)"));
+    m_ui->fixOpensslComboBox->addItem(QStringLiteral("Always on"));
+    m_ui->fixOpensslComboBox->addItem(QStringLiteral("Never"));
+
     // Load configuration if available
     loadConfig(setting);
 
@@ -54,6 +58,7 @@ GpclientWidget::GpclientWidget(const NetworkManager::VpnSetting::Ptr &setting, Q
     connect(m_ui->browserComboBox, &QComboBox::currentTextChanged, this, &GpclientWidget::settingChanged);
     connect(m_ui->dnsLineEdit, &QLineEdit::textChanged, this, &GpclientWidget::settingChanged);
     connect(m_ui->hipCheckBox, &QCheckBox::toggled, this, &GpclientWidget::settingChanged);
+    connect(m_ui->fixOpensslComboBox, &QComboBox::currentTextChanged, this, &GpclientWidget::settingChanged);
 
     auto update_valid = [this]() {
         Q_EMIT validChanged(isValid());
@@ -136,6 +141,17 @@ void GpclientWidget::loadConfig(const NetworkManager::Setting::Ptr &setting)
             m_ui->dnsLineEdit->setText(data.value(QLatin1String("dns")));
         }
 
+        // Legacy TLS renegotiation workaround; the service switches this to
+        // "Always on" itself after a connection that needed it
+        const QString fixOpenssl = data.value(QLatin1String("fix-openssl")).toLower();
+        if (fixOpenssl == QLatin1String("true")) {
+            m_ui->fixOpensslComboBox->setCurrentIndex(1);
+        } else if (fixOpenssl == QLatin1String("false")) {
+            m_ui->fixOpensslComboBox->setCurrentIndex(2);
+        } else {
+            m_ui->fixOpensslComboBox->setCurrentIndex(0);
+        }
+
         // Load HIP (default: enabled)
         const QString hipValue = data.value(QLatin1String("hip"), QLatin1String("true"));
         m_ui->hipCheckBox->setChecked(hipValue.toLower() == QLatin1String("true"));
@@ -200,6 +216,21 @@ QVariantMap GpclientWidget::setting() const
         data.insert(QLatin1String("dns"), m_ui->dnsLineEdit->text());
     } else {
         data.remove(QLatin1String("dns"));
+    }
+
+    // Save the legacy TLS workaround. Automatic stores nothing - the service
+    // reads a missing key as "auto" and switches the profile to "true" once a
+    // portal needs it.
+    switch (m_ui->fixOpensslComboBox->currentIndex()) {
+    case 1:
+        data.insert(QLatin1String("fix-openssl"), QLatin1String("true"));
+        break;
+    case 2:
+        data.insert(QLatin1String("fix-openssl"), QLatin1String("false"));
+        break;
+    default:
+        data.remove(QLatin1String("fix-openssl"));
+        break;
     }
 
     // Save HIP

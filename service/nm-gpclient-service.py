@@ -65,6 +65,25 @@ NM_VPN_PLUGIN_FAILURE_BAD_IP_CONFIG = 2
 # exclusively by gpclient; tun0/tun1 may also belong to other VPN clients.
 TUNNEL_INTERFACES = ["gpd0", "tun0", "tun1"]
 
+GPCLIENT_BINARY = "/usr/bin/gpclient"
+
+# --- Legacy TLS renegotiation ------------------------------------------------
+#
+# Portals with an old TLS stack need renegotiation that OpenSSL 3.x refuses by
+# default, so the prelogin request fails before any browser can open:
+#
+#   error:0A000152:SSL routines:final_renegotiate:unsafe legacy renegotiation disabled
+#   Re-run it with the `--fix-openssl` option to work around this issue
+#
+# gpclient has the workaround built in (a temporary OPENSSL_CONF enabling
+# UnsafeLegacyServerConnect, also passed on to gpauth), but it has to be asked
+# for with a global flag placed before the subcommand. We watch for the error
+# and retry once with the flag, so nobody has to know the option exists
+# (issue #2).
+OPENSSL_LEGACY_ERROR_RE = re.compile(
+    r"unsafe legacy renegotiation disabled|--fix-openssl"
+)
+
 # How long we wait for the user to answer an interactive secrets request
 # (NewSecrets from NetworkManager) before giving up.
 SECRETS_REQUEST_TIMEOUT = 300
@@ -454,6 +473,12 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self.hip_enabled = True  # HIP enabled by default
         self._state = NM_VPN_SERVICE_STATE_INIT
 
+        # Legacy TLS renegotiation workaround (issue #2)
+        self.fix_openssl_mode = "auto"  # auto | true | false
+        self.fix_openssl = False  # pass --fix-openssl to gpclient
+        self._openssl_error_seen = False
+        self._openssl_retried = False
+
         # Portal / gateway selection (issue #7)
         self.as_gateway = False
         self.preferred_gateway = ""
@@ -585,6 +610,8 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self._recent_lines.clear()
         self._answered_select = None
         self._gateway_list = []
+        self._openssl_error_seen = False
+        self._openssl_retried = False
 
         try:
             # Extract VPN data
@@ -683,6 +710,19 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                 raise Exception("No gateway specified")
             logger.info(f"Server: {self.gateway}")
 
+            # Legacy TLS renegotiation workaround (issue #2): auto retries once
+            # after gpclient reports the error, true passes the flag from the
+            # start, false disables the workaround entirely
+            self.fix_openssl_mode = data_dict.get("fix-openssl", "auto").lower()
+            if self.fix_openssl_mode not in ("auto", "true", "false"):
+                logger.warning(
+                    f"Unknown fix-openssl value {self.fix_openssl_mode!r}, "
+                    "falling back to 'auto'"
+                )
+                self.fix_openssl_mode = "auto"
+            self.fix_openssl = self.fix_openssl_mode == "true"
+            logger.info(f"fix-openssl: {self.fix_openssl_mode}")
+
             # Portal / gateway handling (issue #7)
             self.as_gateway = data_dict.get("as-gateway", "false").lower() == "true"
             self.preferred_gateway = data_dict.get("preferred-gateway", "").strip()
@@ -743,7 +783,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
 
         except Exception as e:
             logger.error(f"Connect() failed: {e}")
-            self.Failure.emit(NM_VPN_PLUGIN_FAILURE_CONNECT_FAILED)
+            self._emit_failure(NM_VPN_PLUGIN_FAILURE_CONNECT_FAILED)
             raise
 
     @dbus_method_async()
@@ -780,19 +820,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             self.stdout_monitor_task = None
 
         # Close the PTY
-        if self._pty_transport:
-            try:
-                self._pty_transport.close()
-            except Exception as e:
-                logger.debug(f"Error closing PTY transport: {e}")
-            self._pty_transport = None
-            self._pty_master = None
-        elif self._pty_master is not None:
-            try:
-                os.close(self._pty_master)
-            except OSError:
-                pass
-            self._pty_master = None
+        self._close_pty()
 
         # Kill gpclient process
         if self.gpclient_process:
@@ -829,6 +857,10 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self.never_default = False
         self.custom_routes = []
         self.browser_target = None
+        self.fix_openssl_mode = "auto"
+        self.fix_openssl = False
+        self._openssl_error_seen = False
+        self._openssl_retried = False
         self.as_gateway = False
         self.preferred_gateway = ""
         self._connection_uuid = ""
@@ -1097,10 +1129,13 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             # specified" for every real portal (issue #7). Instead we answer
             # gpclient's gateway prompt ourselves, which also lets us fall back
             # to the first proposal when the configured gateway is gone.
-            cmd = [
-                "/usr/bin/gpclient",
-                "connect",
-            ]
+            cmd = [GPCLIENT_BINARY]
+
+            # Global flag, must come before the subcommand (issue #2)
+            if self.fix_openssl:
+                cmd.append("--fix-openssl")
+
+            cmd.append("connect")
 
             # Add --hip flag if enabled
             if self.hip_enabled:
@@ -1275,6 +1310,10 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                             "settings to authenticate only once"
                         )
 
+                    if not self.fix_openssl and OPENSSL_LEGACY_ERROR_RE.search(line):
+                        # The portal needs legacy TLS renegotiation (issue #2)
+                        self._openssl_error_seen = True
+
                     banner = parse_auth_banner(line)
                     if banner:
                         logger.info(
@@ -1311,13 +1350,97 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             logger.info(f"gpclient process exited with status {returncode}")
 
             if returncode != 0 and not self._login_failed:
+                if await self._retry_with_openssl_fix():
+                    # A new monitor task took over the retried process
+                    return
                 logger.error(f"gpclient failed with exit code {returncode}")
-                self.Failure.emit(NM_VPN_PLUGIN_FAILURE_CONNECT_FAILED)
+                self._emit_failure(NM_VPN_PLUGIN_FAILURE_CONNECT_FAILED)
 
         except asyncio.CancelledError:
             raise
         except Exception as e:
             logger.error(f"Error monitoring gpclient output: {e}")
+
+    async def _retry_with_openssl_fix(self) -> bool:
+        """Restart gpclient once with --fix-openssl after a legacy TLS error.
+
+        The portal needs renegotiation that OpenSSL 3.x refuses, gpclient has
+        the workaround built in and even prints the command to re-run - doing it
+        here means nobody has to know the option exists (issue #2).
+        """
+        if not self._openssl_error_seen or self._openssl_retried:
+            return False
+
+        if self.fix_openssl_mode == "false":
+            logger.warning(
+                "The portal needs legacy TLS renegotiation, but fix-openssl is "
+                "disabled for this connection"
+            )
+            return False
+
+        logger.warning(
+            "The portal needs legacy TLS renegotiation - retrying with "
+            "--fix-openssl. If the connection comes up, this is remembered in "
+            "the profile (fix-openssl=true), so the failed first attempt does "
+            "not repeat"
+        )
+
+        self._openssl_retried = True
+        self.fix_openssl = True
+
+        # Drop the finished process and its PTY before starting over
+        if self._prompt_task and not self._prompt_task.done():
+            self._prompt_task.cancel()
+        self._prompt_task = None
+        self._close_pty()
+        self.gpclient_process = None
+
+        # Fresh output state for the new attempt
+        self._output_scanner = OutputScanner()
+        self._recent_lines.clear()
+        self._auth_banner = None
+        self._answering = False
+        self._last_answer = ""
+        self._answered_select = None
+        self._phase_key = None
+        self._reset_phase_state()
+
+        # Same groundwork as before the first attempt: whatever the failed run
+        # left behind must not be mistaken for the new tunnel (issue #7)
+        await self._cleanup_stale_gpd0()
+        self._preexisting_ifaces = await self._snapshot_tunnel_interfaces()
+
+        if await self._start_gpclient():
+            return True
+
+        logger.error("Failed to restart gpclient with --fix-openssl")
+        return False
+
+    def _close_pty(self) -> None:
+        """Close the PTY master (and its transport, if a reader was attached)"""
+        if self._pty_transport:
+            try:
+                self._pty_transport.close()
+            except Exception as e:
+                logger.debug(f"Error closing PTY transport: {e}")
+            self._pty_transport = None
+            self._pty_master = None
+        elif self._pty_master is not None:
+            try:
+                os.close(self._pty_master)
+            except OSError:
+                pass
+            self._pty_master = None
+
+    def _emit_failure(self, reason: int) -> None:
+        """Report a failed activation to NetworkManager.
+
+        The STOPPED state matters: NetworkManager waits for the transition after
+        a failure, and without it the activation sits there until its own
+        connect timeout expires, which reads as a hang (issue #2).
+        """
+        self.Failure.emit(reason)
+        self.StateChanged.emit(NM_VPN_SERVICE_STATE_STOPPED)
 
     def _schedule_prompt_check(self) -> None:
         """(Re)schedule the debounced check for a pending interactive prompt.
@@ -1580,14 +1703,50 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                 return frame
         return None
 
+    async def _write_vpn_data(self, key: str, value: str) -> bool:
+        """Store one vpn.data key in the connection profile (best effort).
+
+        `+vpn.data` sets a single key and leaves the rest of the dictionary
+        alone, and NetworkManager writes the profile back wherever it lives
+        (including netplan on Ubuntu). Nothing in the connect path depends on
+        this succeeding, so failures are logged and swallowed.
+        """
+        if not self._connection_uuid:
+            logger.debug(f"No connection UUID, not storing vpn.data {key}")
+            return False
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "nmcli",
+                "connection",
+                "modify",
+                self._connection_uuid,
+                "+vpn.data",
+                f"{key}={value}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        except Exception as e:
+            logger.warning(f"Could not store vpn.data {key}: {e}")
+            return False
+
+        if proc.returncode != 0:
+            logger.warning(
+                f"Could not store vpn.data {key}: nmcli exited "
+                f"{proc.returncode}: {stderr.decode('utf-8', errors='replace').strip()}"
+            )
+            return False
+
+        return True
+
     async def _persist_gateway_list(self) -> None:
         """Cache the discovered gateway list in the connection profile.
 
         The connection editors read vpn.data gateway-list to offer a gateway
-        drop-down; nothing in the connect path depends on it, so failures are
-        logged and otherwise ignored.
+        drop-down; nothing in the connect path depends on it.
         """
-        if not self._gateway_list or not self._connection_uuid:
+        if not self._gateway_list:
             return
 
         value = GATEWAY_LIST_SEPARATOR.join(self._gateway_list)
@@ -1596,29 +1755,27 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             return
 
         logger.info(f"Caching gateway list in the connection profile: {value}")
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "nmcli",
-                "connection",
-                "modify",
-                self._connection_uuid,
-                "+vpn.data",
-                f"gateway-list={value}",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
-        except Exception as e:
-            logger.warning(f"Could not cache the gateway list: {e}")
-            return
-
-        if proc.returncode == 0:
+        if await self._write_vpn_data("gateway-list", value):
             self._stored_gateway_list = value
-        else:
-            logger.warning(
-                f"Could not cache the gateway list: nmcli exited "
-                f"{proc.returncode}: {stderr.decode('utf-8', errors='replace').strip()}"
-            )
+
+    async def _persist_fix_openssl(self) -> None:
+        """Remember that this portal needs the legacy TLS workaround.
+
+        We found out by retrying, so storing it means the next connection skips
+        the failed first attempt - and the checkbox in the connection editor
+        shows why (issue #2).
+        """
+        if not self._openssl_retried or not self.fix_openssl:
+            return
+        if self.fix_openssl_mode == "true":
+            return  # already stored in the profile
+
+        logger.info(
+            "Storing fix-openssl=true in the connection profile - this portal "
+            "needs legacy TLS renegotiation"
+        )
+        if await self._write_vpn_data("fix-openssl", "true"):
+            self.fix_openssl_mode = "true"
 
     async def _request_secret_interactive(
         self, secret_key: str, label: str, banner_msg: str
@@ -1696,7 +1853,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         """Emit a login failure and terminate gpclient"""
         logger.error(f"Login failed: {reason}")
         self._login_failed = True
-        self.Failure.emit(NM_VPN_PLUGIN_FAILURE_LOGIN_FAILED)
+        self._emit_failure(NM_VPN_PLUGIN_FAILURE_LOGIN_FAILED)
         if self.gpclient_process:
             try:
                 self.gpclient_process.terminate()
@@ -1967,9 +2124,12 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                     # Emit state change: activated
                     self.StateChanged.emit(NM_VPN_SERVICE_STATE_STARTED)
 
-                    # The login succeeded, so the gateway list we saw is good -
-                    # cache it in the profile for the connection editor
+                    # The login succeeded, so what we learned along the way is
+                    # worth keeping in the profile: the gateway list for the
+                    # editor's drop-down, and whether this portal needs the
+                    # legacy TLS workaround
                     await self._persist_gateway_list()
+                    await self._persist_fix_openssl()
 
                     # Stop checking
                     return

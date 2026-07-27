@@ -20,6 +20,13 @@ network-manager-gpclient (1.4.0-1) unstable; urgency=medium
     NetworkManager's 25 s secrets timeout (closes #8)
   * Expose Preferred gateway, Address is a gateway, Username and
     Authentication in the GNOME and Plasma connection editors
+  * Work around portals that need legacy TLS renegotiation (closes #2): retry
+    once with gpclient's --fix-openssl when it reports
+    "unsafe legacy renegotiation disabled", then store fix-openssl=true in the
+    profile so the failed first attempt does not repeat. New connection option
+    vpn.data fix-openssl=auto|true|false, exposed in the editors
+  * Emit the STOPPED state after a failure, so NetworkManager reports the error
+    immediately instead of waiting out its connect timeout
 
  -- WMP <example@example.org>  Sun, 26 Jul 2026 20:00:00 +0200
 

@@ -28,8 +28,17 @@ def _install_sdbus_stub():
         def __init_subclass__(cls, **kwargs):
             pass
 
+    # D-Bus signals are emitted as `self.SignalName.emit(payload)`. Give the
+    # decorated functions an `emit` attribute (bound methods expose the
+    # function's attributes) that records the call, so tests can assert what the
+    # service reported to NetworkManager.
+    signal_calls = []
+
     def _decorator_factory(*_args, **_kwargs):
         def decorator(func):
+            func.emit = lambda *payload: signal_calls.append(
+                (func.__name__, payload[0] if len(payload) == 1 else payload)
+            )
             return func
 
         return decorator
@@ -45,6 +54,7 @@ def _install_sdbus_stub():
     stub.request_default_bus_name_async = _noop_async
     stub.sd_bus_open_system = lambda: None
     stub.set_default_bus = lambda bus: None
+    stub.SIGNAL_CALLS = signal_calls
 
     sys.modules["sdbus"] = stub
 
@@ -59,3 +69,13 @@ def service_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.fixture
+def dbus_signals():
+    """D-Bus signals the service emitted, as (name, payload) - cleared per test"""
+    _install_sdbus_stub()
+    calls = sys.modules["sdbus"].SIGNAL_CALLS
+    calls.clear()
+    yield calls
+    calls.clear()

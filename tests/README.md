@@ -172,6 +172,7 @@ tests/
 │   ├── test_interactive_prompts.py # Prompt detection/classification (#6)
 │   ├── test_gateway_selection.py  # Gateway list parsing, matching, browser resolution (#7)
 │   ├── test_select_pty.py         # Full output pipeline over a real PTY
+│   ├── test_openssl_retry.py      # Legacy TLS renegotiation retry (#2)
 │   └── test_auth_dialog.py        # Auth dialog protocol, incl. the SAML case (#8)
 ├── helpers/
 │   ├── __init__.py
