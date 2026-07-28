@@ -31,6 +31,11 @@ SECRET_LABELS = {
 # Hints that should be shown as plain-text entries instead of masked ones
 PLAIN_TEXT_HINTS = ("username", "otp")
 
+# One-time secrets: a stored value is worse than none, because the gateway
+# rejects a reused passcode and the whole login fails. Never answer these from
+# what the connection happens to have saved, and never pre-fill them.
+ONE_TIME_HINTS = ("otp",)
+
 
 def read_stdin_data():
     """Read DATA_KEY/DATA_VAL and SECRET_KEY/SECRET_VAL pairs until DONE"""
@@ -144,7 +149,7 @@ def ask_user(vpn_name, requested, message, existing_secrets, data, reprompt):
         entry.set_activates_default(True)
         if key not in PLAIN_TEXT_HINTS:
             entry.set_visibility(False)
-        if not reprompt and existing_secrets.get(key):
+        if not reprompt and key not in ONE_TIME_HINTS and existing_secrets.get(key):
             entry.set_text(existing_secrets[key])
         grid.attach(entry, 1, row, 1, 1)
         entries[key] = entry
@@ -215,8 +220,11 @@ def main():
         requested = ["password"]
 
     # If we already have every requested secret and don't need to re-ask,
-    # return them without any UI.
-    if not args.reprompt and all(existing_secrets.get(key) for key in requested):
+    # return them without any UI. One-time codes are always asked for.
+    reusable = not args.reprompt and not any(
+        key in ONE_TIME_HINTS for key in requested
+    )
+    if reusable and all(existing_secrets.get(key) for key in requested):
         output_secrets({key: existing_secrets[key] for key in requested})
         wait_for_quit()
         return 0

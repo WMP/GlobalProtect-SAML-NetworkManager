@@ -67,6 +67,9 @@ TUNNEL_INTERFACES = ["gpd0", "tun0", "tun1"]
 
 GPCLIENT_BINARY = "/usr/bin/gpclient"
 
+# Secret name used for one-time codes in SecretsRequired/NewSecrets
+OTP_SECRET_KEY = "otp"
+
 # --- Legacy TLS renegotiation ------------------------------------------------
 #
 # Portals with an old TLS stack need renegotiation that OpenSSL 3.x refuses by
@@ -222,6 +225,11 @@ ANSI_ESCAPE_RE = re.compile(
 
 # Control characters except \n, \r and \t
 CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+# An escape sequence cut in half by a read boundary. Without holding the head
+# back, ESC is dropped as a control character and the rest leaks into the text -
+# which is how a prompt label ended up as "[39m Password" in the #2 report.
+INCOMPLETE_ANSI_RE = re.compile(r"\x1b\[?[0-9;?]*$")
 
 # "Please enter RSA token (Portal: vpn.example.com)" banner printed by
 # gpclient before a standard (non-SAML) authentication round.
@@ -478,6 +486,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self.fix_openssl = False  # pass --fix-openssl to gpclient
         self._openssl_error_seen = False
         self._openssl_retried = False
+        self._otp_flags_written = False  # profile told not to save the passcode
 
         # Portal / gateway selection (issue #7)
         self.as_gateway = False
@@ -506,6 +515,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self._pty_master = None
         self._pty_transport = None
         self._output_scanner = OutputScanner()
+        self._ansi_carry = ""  # incomplete escape sequence from the last read
         # Recent complete output lines, used to recognise multi-line prompts
         # (the inquire Select frame with the gateway list) and prompts that
         # inquire has already terminated with a newline
@@ -610,6 +620,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self._answered_password = False
         self._login_failed = False
         self._output_scanner = OutputScanner()
+        self._ansi_carry = ""
         self._recent_lines.clear()
         self._line_counter = 0
         self._answered_at_line = -1
@@ -617,6 +628,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self._gateway_list = []
         self._openssl_error_seen = False
         self._openssl_retried = False
+        self._otp_flags_written = False
 
         try:
             # Extract VPN data
@@ -866,6 +878,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self.fix_openssl = False
         self._openssl_error_seen = False
         self._openssl_retried = False
+        self._otp_flags_written = False
         self.as_gateway = False
         self.preferred_gateway = ""
         self._connection_uuid = ""
@@ -1331,8 +1344,9 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                 if not chunk:
                     break
 
-                text = strip_ansi(chunk.decode("utf-8", errors="replace"))
-                lines = self._output_scanner.feed(text)
+                lines = self._consume_output(
+                    chunk.decode("utf-8", errors="replace")
+                )
 
                 # Once the answered prompt is committed as a full line (its
                 # echo flushed), stop suppressing on the old answer - otherwise
@@ -1419,6 +1433,24 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         except Exception as e:
             logger.error(f"Error monitoring gpclient output: {e}")
 
+    def _consume_output(self, text: str) -> List[str]:
+        """Clean a chunk of PTY output and return the lines it completed.
+
+        An escape sequence cut in half by the read boundary is held back until
+        the rest arrives; otherwise ESC is stripped as a control character and
+        the remainder leaks into the text (issue #2: a prompt label that read
+        "[39m Password").
+        """
+        text = self._ansi_carry + text
+        self._ansi_carry = ""
+
+        split = INCOMPLETE_ANSI_RE.search(text)
+        if split:
+            self._ansi_carry = split.group(0)
+            text = text[: split.start()]
+
+        return self._output_scanner.feed(strip_ansi(text))
+
     async def _retry_with_openssl_fix(self) -> bool:
         """Restart gpclient once with --fix-openssl after a legacy TLS error.
 
@@ -1455,6 +1487,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
 
         # Fresh output state for the new attempt
         self._output_scanner = OutputScanner()
+        self._ansi_carry = ""
         self._recent_lines.clear()
         self._line_counter = 0
         self._answered_at_line = -1
@@ -1636,8 +1669,11 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                     "Prompt looks like a one-time secret (token/OTP/challenge), "
                     "asking the user"
                 )
+                # Do this first: a passcode left in the profile would be handed
+                # back by the agent without asking anyone (issue #2)
+                await self._forget_one_time_secret()
                 answer = await self._request_secret_interactive(
-                    "otp", label, banner_msg
+                    OTP_SECRET_KEY, label, banner_msg
                 )
             else:
                 if self.vpn_password and not self._answered_password:
@@ -1787,8 +1823,8 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                 return frame
         return None
 
-    async def _write_vpn_data(self, key: str, value: str) -> bool:
-        """Store one vpn.data key in the connection profile (best effort).
+    async def _nmcli_modify(self, *arguments: str) -> bool:
+        """Run `nmcli connection modify <uuid> ...` (best effort).
 
         `+vpn.data` sets a single key and leaves the rest of the dictionary
         alone, and NetworkManager writes the profile back wherever it lives
@@ -1796,7 +1832,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         this succeeding, so failures are logged and swallowed.
         """
         if not self._connection_uuid:
-            logger.debug(f"No connection UUID, not storing vpn.data {key}")
+            logger.debug(f"No connection UUID, skipping nmcli {arguments}")
             return False
 
         try:
@@ -1805,24 +1841,47 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                 "connection",
                 "modify",
                 self._connection_uuid,
-                "+vpn.data",
-                f"{key}={value}",
+                *arguments,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             _, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
         except Exception as e:
-            logger.warning(f"Could not store vpn.data {key}: {e}")
+            logger.warning(f"nmcli modify {arguments} failed: {e}")
             return False
 
         if proc.returncode != 0:
             logger.warning(
-                f"Could not store vpn.data {key}: nmcli exited "
-                f"{proc.returncode}: {stderr.decode('utf-8', errors='replace').strip()}"
+                f"nmcli modify {arguments} failed with {proc.returncode}: "
+                f"{stderr.decode('utf-8', errors='replace').strip()}"
             )
             return False
 
         return True
+
+    async def _write_vpn_data(self, key: str, value: str) -> bool:
+        """Store one vpn.data key in the connection profile (best effort)"""
+        return await self._nmcli_modify("+vpn.data", f"{key}={value}")
+
+    async def _forget_one_time_secret(self) -> None:
+        """Keep one-time codes out of the connection profile.
+
+        A saved passcode is worse than none: the desktop agent answers the next
+        connection from the stale value without asking, and the gateway rejects
+        the whole login ("Invalid username or password" in the #2 report).
+        Flag 2 is NM_SETTING_SECRET_FLAG_NOT_SAVED, which tells NetworkManager
+        and the agents to ask every time and store nothing.
+        """
+        if self._otp_flags_written or not self._connection_uuid:
+            return
+
+        self._otp_flags_written = True
+        logger.info(
+            "Marking the one-time code as not-saved in the profile and dropping "
+            "any stored value"
+        )
+        await self._write_vpn_data(f"{OTP_SECRET_KEY}-flags", "2")
+        await self._nmcli_modify("-vpn.secrets", OTP_SECRET_KEY)
 
     async def _persist_gateway_list(self) -> None:
         """Cache the discovered gateway list in the connection profile.
