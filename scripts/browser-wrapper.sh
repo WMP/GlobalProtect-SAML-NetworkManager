@@ -295,20 +295,24 @@ run_browser_with_monitor() {
         return 0
     fi
 
-    local elapsed=0
-    while kill -0 "$BROWSER_PID" 2>/dev/null; do
-        if ! kill -0 "$GPAUTH_PID" 2>/dev/null; then
-            log "done: gpauth ($GPAUTH_PID) exited - authentication finished, closing browser"
-            sleep 2
-            kill "$BROWSER_PID" 2>/dev/null
-            wait "$BROWSER_PID" 2>/dev/null
-            return 0
+    # Stay alive for as long as gpauth does: that is how long the
+    # authentication window can appear, so it is also how long the window rule
+    # has to stay loaded - even when the process we started handed the URL to an
+    # already running browser and exited straight away.
+    local elapsed=0 handed_over=0
+    while kill -0 "$GPAUTH_PID" 2>/dev/null; do
+        if [ "$handed_over" -eq 0 ] && ! kill -0 "$BROWSER_PID" 2>/dev/null; then
+            handed_over=1
+            log "the browser we started exited - the URL went to a running instance"
         fi
 
         if [ "$elapsed" -ge "$MAX_WAIT" ]; then
-            log "done: timeout after ${MAX_WAIT}s with gpauth still running - killing browser"
-            kill -9 "$BROWSER_PID" 2>/dev/null
-            wait "$BROWSER_PID" 2>/dev/null
+            log "done: timeout after ${MAX_WAIT}s with gpauth still running"
+            if [ "$handed_over" -eq 0 ]; then
+                log "killing the browser we started"
+                kill -9 "$BROWSER_PID" 2>/dev/null
+                wait "$BROWSER_PID" 2>/dev/null
+            fi
             return 1
         fi
 
@@ -316,7 +320,15 @@ run_browser_with_monitor() {
         elapsed=$((elapsed + 2))
     done
 
-    log "done: browser exited on its own"
+    if [ "$handed_over" -eq 1 ]; then
+        log "done: gpauth ($GPAUTH_PID) exited - authentication finished (window belongs to a running browser, not closing it)"
+        return 0
+    fi
+
+    log "done: gpauth ($GPAUTH_PID) exited - authentication finished, closing browser"
+    sleep 2
+    kill "$BROWSER_PID" 2>/dev/null
+    wait "$BROWSER_PID" 2>/dev/null
     return 0
 }
 

@@ -289,9 +289,16 @@ gateway (skip the portal)** to get a single authentication. Details:
 
 The `--window-size` the wrapper passes only applies when *it* creates the
 window. If a browser is already running, the URL is handed to that instance,
-which ignores the flag and restores its own remembered geometry. On KDE the
-reliable fix is a KWin window rule matching the authentication window (its class
-contains the local callback address) with size and position applied initially.
+which ignores the flag and restores its own remembered geometry. Wayland gives
+no way to fix this from outside the browser - GNOME's compositor exposes no
+window control at all, and KWin ignores a geometry change while the window is
+still being mapped.
+
+On KDE you can pin it down once with a window rule, which KWin applies during
+placement: *System Settings → Window Management → Window Rules → Add New*, then
+**Window class** → *Substring match* → `127.0.0.1` (the authentication window is
+an app-mode window whose class is derived from the local callback address, so
+this matches it and nothing else), and set **Size** to *Apply Initially*.
 
 ### The authentication browser does not open, or closes too early
 
