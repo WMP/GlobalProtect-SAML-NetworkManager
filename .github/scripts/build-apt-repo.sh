@@ -149,14 +149,16 @@ fi
 
 touch .nojekyll
 
-# One table row per suite: the newest version of the core package
+# One table row per suite: the newest version of the core package. The index
+# lists every version we ever published, in pool order, so they have to be
+# sorted - "the first one" is the oldest.
 version_rows=""
 for suite in "${SUITES[@]}"; do
     packages="dists/$suite/$COMPONENT/binary-$ARCH/Packages"
     version="$(awk -v pkg="Package: $SOURCE_PACKAGE" '
         $0 == pkg { found = 1; next }
-        found && /^Version:/ { print $2; exit }
-    ' "$packages" 2>/dev/null || true)"
+        found && /^Version:/ { print $2; found = 0 }
+    ' "$packages" 2>/dev/null | sort -V | tail -1 || true)"
     [ -n "$version" ] || version="&mdash;"
     version_rows="$version_rows<tr><td><code>$suite</code></td><td><code>$version</code></td></tr>"
 done
