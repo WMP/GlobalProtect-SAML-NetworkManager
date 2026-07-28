@@ -507,8 +507,11 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self._pty_transport = None
         self._output_scanner = OutputScanner()
         # Recent complete output lines, used to recognise multi-line prompts
-        # (the inquire Select frame with the gateway list)
+        # (the inquire Select frame with the gateway list) and prompts that
+        # inquire has already terminated with a newline
         self._recent_lines: deque = deque(maxlen=96)
+        self._line_counter = 0  # monotonic count of complete lines seen
+        self._answered_at_line = -1  # line count when we last answered a prompt
         self._auth_banner = None  # last "message (Portal: server)" banner
         self._prompt_task = None  # debounce task for prompt handling
         self._answering = False  # a prompt is currently being answered
@@ -608,6 +611,8 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self._login_failed = False
         self._output_scanner = OutputScanner()
         self._recent_lines.clear()
+        self._line_counter = 0
+        self._answered_at_line = -1
         self._answered_select = None
         self._gateway_list = []
         self._openssl_error_seen = False
@@ -868,6 +873,8 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self._stored_gateway_list = ""
         self._answered_select = None
         self._recent_lines.clear()
+        self._line_counter = 0
+        self._answered_at_line = -1
         self.vpn_username = ""
         self.vpn_password = ""
         self._interactive = False
@@ -1053,6 +1060,50 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             )
         return environ
 
+    def _scan_session_env(
+        self, real_uid: int, already_found: Dict[str, str]
+    ) -> Dict[str, str]:
+        """Find session variables in any process the user owns.
+
+        Fallback for desktops whose session leader is not in
+        SESSION_LEADER_PROCESSES: the first process that exposes a display wins,
+        and the remaining missing keys are taken from it as well.
+        """
+        found: Dict[str, str] = {}
+
+        try:
+            pids = [entry for entry in os.listdir("/proc") if entry.isdigit()]
+        except OSError as e:
+            logger.debug(f"Cannot list /proc: {e}")
+            return found
+
+        for pid in pids:
+            try:
+                if os.stat(f"/proc/{pid}").st_uid != real_uid:
+                    continue
+            except OSError:
+                continue
+
+            proc_environ = self._read_proc_environ(pid)
+            if not (proc_environ.get("DISPLAY") or proc_environ.get("WAYLAND_DISPLAY")):
+                continue
+
+            for key in SESSION_ENV_KEYS:
+                if key not in already_found and proc_environ.get(key):
+                    found[key] = proc_environ[key]
+
+            try:
+                with open(f"/proc/{pid}/comm") as handle:
+                    name = handle.read().strip()
+            except OSError:
+                name = "?"
+            logger.info(
+                f"Session display taken from a running process: {name} ({pid})"
+            )
+            break
+
+        return found
+
     def _get_session_env(self, real_uid: int, real_home: str) -> Dict[str, str]:
         """Collect the user's graphical session environment.
 
@@ -1085,6 +1136,12 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                     if key not in session_env and proc_environ.get(key):
                         session_env[key] = proc_environ[key]
                         logger.debug(f"Session {key} taken from {process} ({pid})")
+
+        # No display from the known session leaders - the user may run a desktop
+        # we don't have on the list, so look at everything they have running
+        # (issue #2: only XDG_* keys were found, and the browser had no display)
+        if "DISPLAY" not in session_env and "WAYLAND_DISPLAY" not in session_env:
+            session_env.update(self._scan_session_env(real_uid, session_env))
 
         # Fallbacks that don't need a session process
         runtime_dir = session_env.get("XDG_RUNTIME_DIR") or f"/run/user/{real_uid}"
@@ -1290,6 +1347,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                     # Keep the raw line: the Select frame's option marker is
                     # only recognisable by its position (marker, space, value)
                     self._recent_lines.append(raw_line)
+                    self._line_counter += 1
 
                     line = raw_line.strip()
                     # inquire redraws lines on every keystroke; skip repeats
@@ -1398,6 +1456,8 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         # Fresh output state for the new attempt
         self._output_scanner = OutputScanner()
         self._recent_lines.clear()
+        self._line_counter = 0
+        self._answered_at_line = -1
         self._auth_banner = None
         self._answering = False
         self._last_answer = ""
@@ -1480,20 +1540,41 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             return
 
         label = detect_prompt(self._output_scanner.tail, self._last_answer)
+        from_tail = label is not None
+
+        if label is None:
+            # inquire terminates the line it renders a prompt on (every backend
+            # ends with new_line()), so with a real gpclient the pending prompt
+            # is the last COMPLETE line and the tail is empty. Only act on a
+            # line that appeared after our last answer, otherwise the redraw of
+            # an answered prompt would be answered again.
+            if self._line_counter > self._answered_at_line:
+                label = detect_prompt(self._last_output_line(), self._last_answer)
+
         if label is None:
             self._prompt_task = None
             return
 
-        async def _debounced(tail_snapshot: str):
+        async def _debounced(tail_snapshot: str, line_snapshot: int):
             await asyncio.sleep(PROMPT_DEBOUNCE_SECONDS)
-            # Only act if the output is still exactly this prompt
+            # Only act if the output has not moved on since we saw the prompt
             if self._output_scanner.tail != tail_snapshot:
+                return
+            if not from_tail and self._line_counter != line_snapshot:
                 return
             await self._handle_prompt(label)
 
         self._prompt_task = asyncio.create_task(
-            _debounced(self._output_scanner.tail)
+            _debounced(self._output_scanner.tail, self._line_counter)
         )
+
+    def _last_output_line(self) -> str:
+        """Last non-empty line gpclient printed (stripped), or an empty string"""
+        for raw_line in reversed(self._recent_lines):
+            stripped = raw_line.strip()
+            if stripped:
+                return stripped
+        return ""
 
     def _reset_phase_state(self) -> None:
         """Reset per-phase prompt tracking at the start of an auth round.
@@ -1537,6 +1618,8 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         banner_msg = self._auth_banner["message"] if self._auth_banner else ""
         kind = self._classify_prompt_kind(label, banner_msg)
 
+        # Anything already printed must not be taken for a new prompt again
+        self._answered_at_line = self._line_counter
         self._answering = True
         try:
             if kind == "username":
@@ -1594,6 +1677,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         """
         options = frame["options"]
         self._answered_select = frame["message"]
+        self._answered_at_line = self._line_counter
         self._answering = True
         try:
             self._record_gateways(options)

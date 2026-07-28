@@ -63,6 +63,53 @@ while True:
 '''
 
 
+                                                                    # noqa: E501
+# Stand-in that renders prompts the way inquire really does: every backend ends
+# its rendered line with new_line(), so the prompt arrives as a COMPLETE line
+# and nothing is left in the output tail. The service used to look only at the
+# tail, so it never saw a prompt from a real gpclient (issue #2 log).
+FAKE_TERMINATED_PROMPTS_GPCLIENT = r'''
+import os, sys, tty
+
+
+def read_answer():
+    value = b""
+    while True:
+        chunk = os.read(0, 16)
+        if not chunk:
+            break
+        for byte in chunk:
+            if byte in (13, 10):
+                return value.decode()
+            value += bytes([byte])
+    return value.decode()
+
+
+tty.setraw(0)
+sys.stdout.write("[INFO  gpclient::cli] gpclient started: fake\r\n")
+sys.stdout.write("Enter login credentials (Portal: portal.example.com)\r\n")
+# The prompt line is terminated, exactly like inquire renders it
+sys.stdout.write("? Username: \r\n")
+sys.stdout.flush()
+user = read_answer()
+sys.stdout.write("? Username: %s\r\n" % user)
+sys.stdout.write("? Password: \r\n")
+sys.stdout.flush()
+password = read_answer()
+sys.stdout.write("? Password: %s\r\n" % ("*" * len(password)))
+sys.stdout.flush()
+
+if user == "jdoe" and password == "s3cret":
+    sys.stdout.write(
+        "[INFO  gpclient::connect] Connecting to the only available gateway: "
+        "gw-a (a.example.com)\r\n"
+    )
+else:
+    sys.stdout.write("Authentication failure: got %r / %r\r\n" % (user, password))
+sys.stdout.flush()
+sys.exit(0)
+'''
+
 FAKE_CREDENTIALS_GPCLIENT = r'''
 import os, sys, tty
 
@@ -189,6 +236,54 @@ class TestGatewaySelectionOverPty:
 class TestStoredCredentialsOverPty:
     """Regression for issue #6: the text-prompt flow must still work now that
     the list-prompt check runs first in _schedule_prompt_check()."""
+
+    def _run(self, service_module, fake_path):
+        async def scenario():
+            plugin = service_module.GpclientVPNPlugin()
+            plugin.vpn_username = "jdoe"
+            plugin.vpn_password = "s3cret"
+            plugin._reset_phase_state()
+
+            master, slave = pty.openpty()
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                str(fake_path),
+                stdin=slave,
+                stdout=slave,
+                stderr=slave,
+            )
+            os.close(slave)
+            plugin._pty_master = master
+            plugin.gpclient_process = process
+
+            monitor = asyncio.create_task(plugin._monitor_gpclient_output())
+            try:
+                await asyncio.wait_for(process.wait(), timeout=20)
+                await asyncio.wait_for(monitor, timeout=10)
+            finally:
+                if not monitor.done():
+                    monitor.cancel()
+                if plugin._prompt_task and not plugin._prompt_task.done():
+                    plugin._prompt_task.cancel()
+            return plugin
+
+        return asyncio.run(scenario())
+
+    def test_prompts_terminated_by_inquire_are_answered(
+        self, service_module, tmp_path
+    ):
+        """The real case from the #2 log: inquire ends the prompt line, so the
+        prompt is a complete line and the tail is empty."""
+        fake = tmp_path / "fake-gpclient-terminated.py"
+        fake.write_text(FAKE_TERMINATED_PROMPTS_GPCLIENT)
+
+        plugin = self._run(service_module, fake)
+
+        lines = list(plugin._recent_lines)
+        assert not any("Authentication failure" in line for line in lines), (
+            "the credentials never reached gpclient - the prompt was not detected"
+        )
+        assert any("Connecting to the only available gateway" in line for line in lines)
 
     def test_username_and_password_are_typed_from_the_profile(
         self, service_module, tmp_path
