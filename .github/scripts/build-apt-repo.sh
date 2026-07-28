@@ -38,16 +38,30 @@ die() { echo "[build-apt-repo] ERROR: $*" >&2; exit 1; }
 
 # Which suite does this .deb belong to?
 #
-# Current builds carry the codename in the version (1.4.0-1~noble1). Releases
-# v1.0.0/v1.2.0 predate that and use a _ubuntu24.04.deb filename suffix instead.
+# Current builds carry the codename in the version (1.4.0-1~noble1), so that is
+# read from the package itself: GitHub replaces the tilde with a dot when it
+# stores a release asset, so the file name is not trustworthy. Releases
+# v1.0.0/v1.2.0 predate the versioned builds and only carry the release in their
+# file name (_ubuntu24.04.deb).
 suite_for_deb() {
-    local name
-    name="$(basename "$1")"
+    local file="$1" version codename name
 
+    version="$(dpkg-deb -f "$file" Version 2>/dev/null || true)"
+    codename="$(printf '%s' "$version" | sed -n 's/.*~\([a-z][a-z]*\)[0-9]*$/\1/p')"
+
+    if [ -n "$codename" ]; then
+        for suite in "${SUITES[@]}"; do
+            if [ "$suite" = "$codename" ]; then
+                echo "$codename"
+                return 0
+            fi
+        done
+        log "WARNING: $(basename "$file") is built for unknown release '$codename'"
+        return 1
+    fi
+
+    name="$(basename "$file")"
     case "$name" in
-        *~jammy*)          echo jammy ;;
-        *~noble*)          echo noble ;;
-        *~resolute*)       echo resolute ;;
         *_ubuntu22.04.deb) echo jammy ;;
         *_ubuntu24.04.deb) echo noble ;;
         *_ubuntu26.04.deb) echo resolute ;;
@@ -70,7 +84,7 @@ shopt -u nullglob
 for deb in "${debs[@]}"; do
     suite="$(suite_for_deb "$deb")" || die \
         "cannot tell which Ubuntu release $(basename "$deb") is for - expected a
-       ~<codename>1 version suffix or a _ubuntu<version>.deb filename"
+       ~<codename>1 suffix in its version or a _ubuntu<version>.deb file name"
 
     pool="$OUTDIR/pool/$suite/$COMPONENT/${SOURCE_PACKAGE:0:1}/$SOURCE_PACKAGE"
     mkdir -p "$pool"
