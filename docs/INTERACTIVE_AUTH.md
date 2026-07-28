@@ -138,6 +138,36 @@ portal)* (`vpn.data as-gateway=true`) - otherwise the portal workflow is tried
 first and you may end up authenticating twice. When gpclient itself notices
 this, the service logs a hint saying so.
 
+### Two browser windows for one connection
+
+Some portals authenticate you twice, which means two browser windows in a row:
+
+```
+gpauth started            <- portal authentication
+Connecting to the selected gateway: gw1.example.com (gw1.example.com)
+GP response error: ... respMsg = "Authentication failure: Invalid username or password"
+Gateway login failed: Gateway login error: <none>
+Performing the gateway authentication...
+gpauth started            <- and again, for the gateway
+```
+
+Nothing is wrong with the credentials. gpclient first tries to log in to the
+chosen gateway with the authentication cookie it got from the portal; when the
+gateway refuses that cookie, it falls back to a full gateway authentication,
+which opens a second browser window. This is gpclient's behaviour, not the
+plugin's.
+
+If the address in your connection is *itself* one of the gateways the portal
+offers (compare it with the cached `gateway-list`), you can skip the portal
+round entirely and get a single authentication:
+
+```bash
+nmcli connection modify "My VPN" +vpn.data as-gateway=true
+```
+
+The trade-off is that you no longer pick between gateways - you always connect
+to the address in the connection.
+
 ## Desktop support
 
 - **GNOME / nm-applet**: the plugin installs

@@ -277,6 +277,22 @@ first attempt does not repeat. To set it up front, or to turn it off:
 nmcli connection modify "My VPN" +vpn.data fix-openssl=true    # or false
 ```
 
+### Two browser windows open for one connection
+
+gpclient tries the gateway with the portal's authentication cookie first and
+authenticates again when the gateway refuses it. If the address in your
+connection is itself one of the gateways in `gateway-list`, tick **Address is a
+gateway (skip the portal)** to get a single authentication. Details:
+[docs/INTERACTIVE_AUTH.md](docs/INTERACTIVE_AUTH.md#two-browser-windows-for-one-connection).
+
+### The authentication window has a different size every time
+
+The `--window-size` the wrapper passes only applies when *it* creates the
+window. If a browser is already running, the URL is handed to that instance,
+which ignores the flag and restores its own remembered geometry. On KDE the
+reliable fix is a KWin window rule matching the authentication window (its class
+contains the local callback address) with size and position applied initially.
+
 ### The authentication browser does not open, or closes too early
 
 ```bash
