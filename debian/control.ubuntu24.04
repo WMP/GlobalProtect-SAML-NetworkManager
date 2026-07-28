@@ -55,7 +55,9 @@ Architecture: amd64
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          network-manager-gpclient (= ${binary:Version}),
-         network-manager-gnome
+         network-manager-gnome,
+         python3-gi,
+         gir1.2-gtk-3.0
 Description: NetworkManager GlobalProtect VPN plugin - GNOME GUI
  This package provides GUI configuration editors for GlobalProtect VPN
  connections in GNOME-based desktop environments.

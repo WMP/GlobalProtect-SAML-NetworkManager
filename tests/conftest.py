@@ -16,8 +16,24 @@ from helpers.dogtail_utils import (
 from helpers.screenshot import take_screenshot_on_failure
 
 
+def _only_unit_tests(config):
+    """True when the run targets only tests/unit (no GUI environment needed)."""
+    unit_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "unit"))
+    args = config.args or []
+    if not args:
+        return False
+    for arg in args:
+        path = os.path.abspath(str(arg).split("::")[0])
+        if not (path == unit_dir or path.startswith(unit_dir + os.sep)):
+            return False
+    return True
+
+
 def pytest_configure(config):
     """Check environment before running tests."""
+    if _only_unit_tests(config):
+        return
+
     session_info = get_session_info()
 
     print("\n=== Session Info ===")
@@ -93,4 +109,8 @@ def pytest_runtest_makereport(item, call):
     rep = outcome.get_result()
 
     if rep.when == "call" and rep.failed:
-        take_screenshot_on_failure(item.name)
+        # Never let the screenshot get in the way of reporting the failure
+        try:
+            take_screenshot_on_failure(item.name)
+        except Exception as e:  # noqa: BLE001 - diagnostics must not mask failures
+            print(f"Screenshot for {item.name} failed: {e}")

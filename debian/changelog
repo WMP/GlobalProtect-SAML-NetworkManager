@@ -1,3 +1,48 @@
+network-manager-gpclient (1.4.0-1) unstable; urgency=medium
+
+  * Fix portal addresses: --gateway is no longer forced to the server address,
+    which made gpclient abort with "Cannot find gateway specified" for every
+    real portal (closes #7). The gateway prompt is answered by the service:
+    vpn.data preferred-gateway if it matches, otherwise the portal's first
+    proposal, with a fallback when a configured gateway is gone
+  * Cache the portal's gateway list in the profile (vpn.data gateway-list)
+    after a successful connection and offer it in the connection editors
+  * New connection options: vpn.data as-gateway, vpn.data preferred-gateway
+  * Fix the authentication browser closing after ~8 s: the new
+    /usr/libexec/gpclient/browser-wrapper waits for gpauth to finish instead
+    of guessing from tunnel interfaces (GP_AUTH_TIMEOUT overrides the 300 s
+    safety timeout); edge-wrapper stays as a compatibility shim
+  * Support any browser (edge, firefox, chrome, chromium, default) and import
+    the user's session environment, so browsers other than Edge actually open
+    a window on Wayland (closes #7)
+  * Auth dialog: answer SAML connections with an empty secret set instead of
+    an error, so opening the connection editor no longer waits out
+    NetworkManager's 25 s secrets timeout (closes #8)
+  * Expose Preferred gateway, Address is a gateway, Username and
+    Authentication in the GNOME and Plasma connection editors
+  * Work around portals that need legacy TLS renegotiation (closes #2): retry
+    once with gpclient's --fix-openssl when it reports
+    "unsafe legacy renegotiation disabled", then store fix-openssl=true in the
+    profile so the failed first attempt does not repeat. New connection option
+    vpn.data fix-openssl=auto|true|false, exposed in the editors
+  * Emit the STOPPED state after a failure, so NetworkManager reports the error
+    immediately instead of waiting out its connect timeout
+
+ -- WMP <example@example.org>  Sun, 26 Jul 2026 20:00:00 +0200
+
+network-manager-gpclient (1.3.0-1) unstable; urgency=medium
+
+  * Support portals with standard login / RSA token challenges (closes #6):
+    run gpclient under a PTY, detect its interactive prompts and answer
+    them from stored connection secrets or interactively via the
+    NetworkManager SecretsRequired/NewSecrets flow
+  * Add GNOME/nm-applet auth dialog (/usr/libexec/nm-gpclient-auth-dialog)
+  * New connection options: vpn.data username, vpn.data auth-mode=credentials,
+    vpn.secrets password
+  * Add unit tests for prompt detection (make test-unit)
+
+ -- WMP <example@example.org>  Sat, 18 Jul 2026 12:00:00 +0200
+
 network-manager-gpclient (1.2.0-1) unstable; urgency=medium
 
   * Add Ubuntu 26.04 LTS build target (Plasma 6 / Qt6 / KF6)

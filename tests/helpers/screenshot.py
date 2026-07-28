@@ -34,25 +34,21 @@ def take_screenshot(name=None):
 
     filepath = os.path.join(ARTIFACTS_DIR, f"{name}.png")
 
-    # Try gnome-screenshot first
-    result = subprocess.run(["gnome-screenshot", "-f", filepath], capture_output=True)
+    # gnome-screenshot first, then ImageMagick, then scrot. A missing tool must
+    # not raise: this runs from a pytest failure hook, and an exception there
+    # turns into an INTERNALERROR that hides the actual test failure.
+    for command in (
+        ["gnome-screenshot", "-f", filepath],
+        ["import", "-window", "root", filepath],
+        ["scrot", filepath],
+    ):
+        try:
+            result = subprocess.run(command, capture_output=True)
+        except (FileNotFoundError, OSError):
+            continue
 
-    if result.returncode == 0 and os.path.exists(filepath):
-        return filepath
-
-    # Fallback to ImageMagick import
-    result = subprocess.run(
-        ["import", "-window", "root", filepath], capture_output=True
-    )
-
-    if result.returncode == 0 and os.path.exists(filepath):
-        return filepath
-
-    # Last resort: scrot
-    result = subprocess.run(["scrot", filepath], capture_output=True)
-
-    if result.returncode == 0 and os.path.exists(filepath):
-        return filepath
+        if result.returncode == 0 and os.path.exists(filepath):
+            return filepath
 
     return None
 
