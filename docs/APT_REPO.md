@@ -41,8 +41,9 @@ Use the value of `dpkg --print-architecture` (`arm64` on ARM); without the line 
 also asks for foreign-architecture indexes such as `i386`, which the repository
 does not publish.
 
-`apt changelog network-manager-gpclient` shows the changelog: it is published next to
-the packages and announced by the `Changelogs` field of every `Release` file.
+`apt changelog network-manager-gpclient` shows the changelog: it is published under
+`/changelogs/<component>/<prefix>/<source>/<source>_<version>_changelog` (not next to
+the packages) and announced by the `Changelogs` field of every `Release` file.
 
 Supported suites are Ubuntu release codenames: `jammy` (22.04), `noble` (24.04),
 `resolute` (26.04). Both `amd64` and `arm64` are built; apt picks the one matching
@@ -112,7 +113,8 @@ export GNUPGHOME=/tmp/gnupg && mkdir -p -m 700 $GNUPGHOME
 gpg --batch --passphrase '' --pinentry-mode loopback \
     --quick-generate-key 'test <test@example.invalid>' rsa3072 sign never
 KEY=$(gpg --batch --with-colons --list-secret-keys | awk -F: '/^fpr:/ {print $10; exit}')
-bash /repo/.github/scripts/build-apt-repo.sh /incoming /site "$KEY"
+# the repository URL goes into the Release files (Changelogs:) and the landing page
+APT_REPO_URL=http://127.0.0.1:8000 bash /repo/.github/scripts/build-apt-repo.sh /incoming /site "$KEY"
 
 cd /site && python3 -m http.server 8000 &
 install -m 644 /site/gpclient-archive-keyring.gpg /usr/share/keyrings/gpclient.gpg
@@ -126,6 +128,12 @@ The last command must show `Inst network-manager-gpclient` **and**
 `Inst network-manager-gpclient-gnome`: apt pulling the core package in as a
 dependency is the whole point. `apt-get update` must not print any warning about
 signatures or an unauthenticated repository.
+
+`APT_REPO_URL` (default `https://wmp.github.io/GlobalProtect-SAML-NetworkManager`) is the
+address the repository is served from. Without it `apt changelog` and the install commands
+on the landing page point at the public site instead of your test server. The changelog of a
+package is taken from `changelog.Debian.gz`, or from `changelog.gz` in a native package;
+a package without one, or that cannot be unpacked (reported as `ERROR`), does not stop the build.
 
 Leaving out the key id builds an unsigned repository, which apt only accepts
 with `[trusted=yes]` - useful for a quick structural check, never for publishing.

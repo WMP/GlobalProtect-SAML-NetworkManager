@@ -1,8 +1,18 @@
 """
-Tests for .github/scripts/build-apt-repo.sh with the package for KDE neon,
-network-manager-gpclient-plasma-6: it is built for Ubuntu 24.04 (version 1.5.0-1~noble1), so
-it belongs to the suite noble and to amd64 only, like the codename of any other package says;
-nothing is decided by the name of the package.
+Tests for .github/scripts/build-apt-repo.sh: which suite and architecture index a package goes
+to, the landing page, and the changelogs published for `apt changelog`.
+
+Suites: the package for KDE neon, network-manager-gpclient-plasma-6, is built for Ubuntu 24.04
+(version 1.5.0-1~noble1), so it belongs to the suite noble and to amd64 only, like the codename of
+any other package says; nothing is decided by the name of the package.
+
+Landing page: the version table, the fingerprint (or the unsigned fallback) and the repository
+URL (APT_REPO_URL) are filled in literally.
+
+Changelogs: taken from changelog.Debian.gz or, in a native package, changelog.gz; published under
+changelogs/<component>/<prefix>/<source>/; announced once by the Changelogs field of every Release
+file, ahead of the checksum sections; a source or version that is not a plain name never reaches
+a path, and a package that cannot be unpacked is reported without stopping the build.
 
 The .deb files are real (dpkg-deb --build of an empty package); apt-ftparchive, which only writes
 the Release file, is a fake, and the repository is not signed. Every positive test has a negative
@@ -24,13 +34,30 @@ CORE = "network-manager-gpclient"
 PLASMA6 = CORE + "-plasma-6"
 
 FAKE_FTPARCHIVE = """#!/bin/sh
-# apt-ftparchive ... release <dir>: only the Release file's existence matters here
-echo "Suite: fake"
+# apt-ftparchive ... release <dir>: prints the canned Release file next to this script
+cat "$(dirname "$0")/release.txt"
+"""
+
+# What apt-ftparchive prints: the checksum fields are multi-line, one indented line per file
+RELEASE = """Origin: GlobalProtect-SAML-NetworkManager
+Suite: noble
+Codename: noble
+Date: Sat, 03 Oct 2026 10:00:00 UTC
+Architectures: amd64 arm64
+Components: main
+Description: NetworkManager VPN plugin for GlobalProtect (SAML/SSO)
+MD5Sum:
+ d41d8cd98f00b204e9800998ecf8427e                0 main/binary-amd64/Packages
+ 7029066c27ac6f5ef18d660d5741979a               20 main/binary-amd64/Packages.gz
+SHA256:
+ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855                0 main/binary-amd64/Packages
+ f3d9c6a1e0bd2e5c9c3e5a7b1d9e0f2a4b6c8d0e1f3a5b7c9d1e3f5a7b9c1d3e               20 main/binary-amd64/Packages.gz
 """
 
 
-def make_deb(directory, package, version, arch="amd64", source=None, changelog=None):
-    """A real, empty .deb; returns its path"""
+def make_deb(directory, package, version, arch="amd64", source=None, changelog=None, native_changelog=None):
+    """A real, empty .deb; returns its path. changelog is installed as changelog.Debian.gz,
+    native_changelog as changelog.gz (what debhelper does for a version without a Debian revision)"""
     root = directory / f"{package}_{version}_{arch}"
     (root / "DEBIAN").mkdir(parents=True)
     (root / "DEBIAN" / "control").write_text(
@@ -38,10 +65,11 @@ def make_deb(directory, package, version, arch="amd64", source=None, changelog=N
         + (f"Source: {source}\n" if source else "")
         + "Description: x\n x\n"
     )
-    if changelog is not None:
-        doc = root / "usr" / "share" / "doc" / package
-        doc.mkdir(parents=True)
-        (doc / "changelog.Debian.gz").write_bytes(gzip.compress(changelog.encode()))
+    for name, text in (("changelog.Debian.gz", changelog), ("changelog.gz", native_changelog)):
+        if text is not None:
+            doc = root / "usr" / "share" / "doc" / package
+            doc.mkdir(parents=True, exist_ok=True)
+            (doc / name).write_bytes(gzip.compress(text.encode()))
     deb = directory / f"{package}_{version}_{arch}.deb"
     subprocess.run(["dpkg-deb", "--build", str(root), str(deb)], check=True, capture_output=True)
     return deb
@@ -56,6 +84,7 @@ class Repo:
         self.bin.mkdir()
         (self.bin / "apt-ftparchive").write_text(FAKE_FTPARCHIVE)
         (self.bin / "apt-ftparchive").chmod(0o755)
+        self.release(RELEASE)
         self.work = tmp_path / "work"
         self.work.mkdir()
 
@@ -63,10 +92,15 @@ class Repo:
         deb = make_deb(self.work, package, version, arch, **kwargs)
         return deb.rename(self.incoming / f"{package}_{version}_{arch}.deb")
 
-    def build(self):
-        env = {"PATH": f"{self.bin}:/usr/bin:/bin"}
-        return subprocess.run(["bash", SCRIPT, str(self.incoming), str(self.out)], env=env, capture_output=True,
-                              text=True, timeout=120)
+    def release(self, text):
+        """What the fake apt-ftparchive prints"""
+        (self.bin / "release.txt").write_text(text)
+
+    def build(self, key=None, env=None):
+        """Run the script, optionally signing with key; env adds variables to the environment"""
+        full_env = {"PATH": f"{self.bin}:/usr/bin:/bin", **(env or {})}
+        args = ["bash", SCRIPT, str(self.incoming), str(self.out)] + ([key] if key else [])
+        return subprocess.run(args, env=full_env, capture_output=True, text=True, timeout=120)
 
     def index(self, suite, arch):
         path = self.out / "dists" / suite / "main" / f"binary-{arch}" / "Packages"
@@ -146,6 +180,8 @@ class TestPlasma6ForKdeNeon:
         assert "unsupported architecture 'i386'" in result.stderr
 
 
+DEFAULT_URL = "https://wmp.github.io/GlobalProtect-SAML-NetworkManager"
+
 FAKE_GPG = """#!/bin/sh
 # --fingerprint prints a colon-separated record; every other call (export, sign) succeeds silently
 case "$*" in
@@ -182,19 +218,64 @@ class TestLandingPage:
         repo.add(CORE, "1.5.0-1~noble1")
         (repo.bin / "gpg").write_text(FAKE_GPG)
         (repo.bin / "gpg").chmod(0o755)
-        env = {"PATH": f"{repo.bin}:/usr/bin:/bin"}
 
-        result = subprocess.run(["bash", SCRIPT, str(repo.incoming), str(repo.out), "KEY"], env=env,
-                                capture_output=True, text=True, timeout=120)
+        result = repo.build(key="KEY")
 
         assert result.returncode == 0, result.stderr + result.stdout
         html = self.index_html(repo)
         assert "<pre><code>AB&CD|EF\\GH</code></pre>" in html
         assert "__FINGERPRINT__" not in html
+        assert "(unsigned test build)" not in html
+
+    def test_without_a_key_the_fingerprint_says_the_build_is_unsigned(self, repo):
+        repo.add(CORE, "1.5.0-1~noble1")
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        html = self.index_html(repo)
+        assert "<pre><code>(unsigned test build)</code></pre>" in html
+        assert "__FINGERPRINT__" not in html
+        assert not (repo.out / "gpclient-archive-keyring.gpg").exists()
+
+    def test_the_default_repository_url_is_written_to_the_page(self, repo):
+        repo.add(CORE, "1.5.0-1~noble1")
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        html = self.index_html(repo)
+        assert f"curl -fsSL {DEFAULT_URL}/gpclient-archive-keyring.gpg" in html
+        assert "__REPO_URL__" not in html
+
+    def test_apt_repo_url_replaces_the_url_on_the_page_literally(self, repo):
+        repo.add(CORE, "1.5.0-1~noble1")
+
+        result = repo.build(env={"APT_REPO_URL": "http://127.0.0.1:8000/a&b|c"})
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        html = self.index_html(repo)
+        assert "curl -fsSL http://127.0.0.1:8000/a&b|c/gpclient-archive-keyring.gpg" in html
+        assert "wmp.github.io" not in html
+        assert "__REPO_URL__" not in html
+
+
+def corrupt_deb(path, member):
+    """Replace the data member of a .deb with garbage: the control data stays readable"""
+    work = path.parent / (path.name + ".ar")
+    work.mkdir()
+    subprocess.run(["ar", "x", str(path)], cwd=work, check=True, capture_output=True)
+    for old in work.glob("data.tar*"):
+        old.unlink()
+    (work / member).write_bytes(b"this is not an archive\n" * 50)
+    path.unlink()
+    control = next(work.glob("control.tar*")).name
+    subprocess.run(["ar", "rc", str(path), "debian-binary", control, member], cwd=work, check=True,
+                   capture_output=True)
 
 
 class TestChangelogs:
-    URL_LINE = "Changelogs: https://wmp.github.io/GlobalProtect-SAML-NetworkManager/changelogs/@CHANGEPATH@_changelog\n"
+    URL_LINE = f"Changelogs: {DEFAULT_URL}/changelogs/@CHANGEPATH@_changelog\n"
     TEXT = "network-manager-gpclient (1.5.0-1~noble1) noble; urgency=medium\n\n  * Test.\n"
 
     def changelogs(self, repo):
@@ -203,6 +284,15 @@ class TestChangelogs:
             found += [os.path.relpath(os.path.join(dirpath, n), repo.out / "changelogs") for n in names]
         return sorted(found)
 
+    def directories(self, repo):
+        found = []
+        for dirpath, names, _ in os.walk(repo.out / "changelogs"):
+            found += [os.path.join(dirpath, n) for n in names]
+        return found
+
+    def release(self, repo, suite="noble"):
+        return (repo.out / "dists" / suite / "Release").read_text()
+
     def test_every_release_file_names_the_changelog_location(self, repo):
         repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT)
 
@@ -210,7 +300,50 @@ class TestChangelogs:
 
         assert result.returncode == 0, result.stderr + result.stdout
         for suite in ("jammy", "noble", "oracular", "resolute"):
-            assert self.URL_LINE in (repo.out / "dists" / suite / "Release").read_text(), suite
+            assert self.URL_LINE in self.release(repo, suite), suite
+
+    def test_the_line_is_there_once_ahead_of_the_checksums_which_stay_intact(self, repo):
+        repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT)
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        lines = self.release(repo).splitlines()
+        assert lines.count(self.URL_LINE.rstrip()) == 1
+        assert sum(1 for line in lines if line.startswith("Changelogs:")) == 1
+        assert lines.index(self.URL_LINE.rstrip()) < lines.index("MD5Sum:") < lines.index("SHA256:")
+        lines.remove(self.URL_LINE.rstrip())
+        assert lines == RELEASE.splitlines()
+
+    def test_without_checksum_sections_the_line_is_added_at_the_end(self, repo):
+        repo.release("Suite: noble\nCodename: noble\n")
+        repo.add(CORE, "1.5.0-1~noble1")
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert self.release(repo) == "Suite: noble\nCodename: noble\n" + self.URL_LINE
+
+    def test_apt_repo_url_sets_the_line_and_a_trailing_slash_does_not_matter(self, repo):
+        repo.add(CORE, "1.5.0-1~noble1")
+
+        for url in ("http://127.0.0.1:8000", "http://127.0.0.1:8000/"):
+            result = repo.build(env={"APT_REPO_URL": url})
+
+            assert result.returncode == 0, result.stderr + result.stdout
+            lines = self.release(repo).splitlines()
+            assert "Changelogs: http://127.0.0.1:8000/changelogs/@CHANGEPATH@_changelog" in lines
+            assert not [line for line in lines if "wmp.github.io" in line]
+
+    def test_a_stray_base_url_in_the_environment_changes_nothing(self, repo):
+        repo.add(CORE, "1.5.0-1~noble1")
+
+        result = repo.build(env={"BASE_URL": "https://evil.example"})
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert self.URL_LINE in self.release(repo)
+        assert "evil.example" not in self.release(repo)
+        assert "evil.example" not in (repo.out / "index.html").read_text()
 
     def test_the_changelog_is_published_uncompressed_under_the_apt_path(self, repo):
         repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT)
@@ -220,6 +353,24 @@ class TestChangelogs:
         assert result.returncode == 0, result.stderr + result.stdout
         path = repo.out / "changelogs" / "main" / "n" / CORE / f"{CORE}_1.5.0-1~noble1_changelog"
         assert path.read_text() == self.TEXT
+
+    def test_a_native_package_has_changelog_gz_instead_of_changelog_debian_gz(self, repo):
+        repo.add(CORE, "1.5.0~noble1", native_changelog=self.TEXT)
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        path = repo.out / "changelogs" / "main" / "n" / CORE / f"{CORE}_1.5.0~noble1_changelog"
+        assert path.read_text() == self.TEXT
+
+    def test_changelog_debian_gz_wins_over_changelog_gz(self, repo):
+        repo.add(CORE, "1.5.0-1~noble1", changelog="debian\n", native_changelog="native\n")
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        path = repo.out / "changelogs" / "main" / "n" / CORE / f"{CORE}_1.5.0-1~noble1_changelog"
+        assert path.read_text() == "debian\n"
 
     def test_binaries_of_one_source_share_one_file(self, repo):
         repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT)
@@ -253,6 +404,46 @@ class TestChangelogs:
         result = repo.build()
 
         assert result.returncode == 0, result.stderr + result.stdout
-        assert "no changelog.Debian.gz" in result.stdout
+        assert "no changelog.Debian.gz or changelog.gz" in result.stdout
+        assert "ERROR" not in result.stderr
         assert self.changelogs(repo) == []
+        assert self.directories(repo) == []
+        assert f"Package: {CORE}\n" in repo.index("noble", "amd64")
+
+    @pytest.mark.parametrize("source", [
+        "../../dists/x",
+        "../../../escaped",
+        "a/b",
+        "Upper",
+        "-dash",
+        "x..y",
+        "libfoo (../../dists/x)",
+        "libfoo (1.0/../../x)",
+        "libfoo (1..0)",
+        "libfoo ()",
+    ])
+    def test_a_source_or_version_that_is_not_a_plain_name_is_not_used_in_a_path(self, repo, tmp_path, source):
+        repo.add("libfoo1", "1.0-1~noble1", source=source, changelog="foo\n")
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert "not publishing a changelog" in result.stdout
+        assert [p for p in tmp_path.rglob("*_changelog")] == []
+        assert not (repo.out / "dists" / "x").exists()
+        assert self.directories(repo) == []
+        assert "Package: libfoo1\n" in repo.index("noble", "amd64")
+
+    @pytest.mark.parametrize("member", ["data.tar.gz", "data.tar"])
+    def test_a_package_that_cannot_be_unpacked_is_reported_and_the_build_goes_on(self, repo, member):
+        deb = repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT)
+        corrupt_deb(deb, member)
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert "ERROR" in result.stderr
+        assert deb.name in result.stderr
+        assert self.changelogs(repo) == []
+        assert self.directories(repo) == []
         assert f"Package: {CORE}\n" in repo.index("noble", "amd64")
