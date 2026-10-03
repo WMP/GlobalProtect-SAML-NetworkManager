@@ -11,10 +11,21 @@ import os
 WORKFLOWS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".github", "workflows"))
 
 
-def step_lines(workflow, name):
-    """All the lines of the step `name` of .github/workflows/<workflow>"""
+def read_workflow(workflow):
+    """The text of .github/workflows/<workflow>"""
     with open(os.path.join(WORKFLOWS, workflow), encoding="utf-8") as handle:
-        lines = handle.read().splitlines()
+        return handle.read()
+
+
+def step_names(workflow, text=None):
+    """The names of the steps of a workflow, in order. `text` replaces the file (a modified copy)"""
+    lines = (read_workflow(workflow) if text is None else text).splitlines()
+    return [line[len("      - name: "):] for line in lines if line.startswith("      - name: ")]
+
+
+def step_lines(workflow, name, text=None):
+    """All the lines of the step `name` of .github/workflows/<workflow>; `text` replaces the file"""
+    lines = (read_workflow(workflow) if text is None else text).splitlines()
     start = lines.index(f"      - name: {name}")
     block = [lines[start]]
     for line in lines[start + 1:]:
