@@ -11,6 +11,7 @@
 #   dists/<suite>/{Release,Release.gpg,InRelease}
 #   dists/<suite>/main/binary-<arch>/{Packages,Packages.gz}   (amd64 and arm64)
 #   pool/<suite>/main/n/network-manager-gpclient/*.deb        (all architectures)
+#   changelogs/main/<prefix>/<source>/<source>_<version>_changelog   (for `apt changelog`)
 #   gpclient-archive-keyring.gpg, index.html, .nojekyll
 #
 # Requires: dpkg-dev (dpkg-scanpackages), apt-utils (apt-ftparchive), gnupg.
@@ -30,12 +31,39 @@ DESCRIPTION="NetworkManager VPN plugin for GlobalProtect (SAML/SSO)"
 # Architectures we build for; each gets its own binary-<arch> index per suite
 ARCHES=(amd64 arm64)
 COMPONENT="main"
+# Where the repository is served; `apt changelog` downloads from here
+BASE_URL="${BASE_URL:-https://wmp.github.io/GlobalProtect-SAML-NetworkManager}"
 SOURCE_PACKAGE="network-manager-gpclient"
 # Ubuntu releases we build for; the suite name is the release codename
 SUITES=(jammy noble oracular resolute)
 
 log() { echo "[build-apt-repo] $*"; }
 die() { echo "[build-apt-repo] ERROR: $*" >&2; exit 1; }
+
+# Escape a value for the replacement part of a sed "s|...|...|" command:
+# backslash, & (the matched text) and the | delimiter are special there
+sed_escape() { printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
+
+# Path of the changelog of a .deb, relative to the "Changelogs:" base URL, in
+# the layout apt expects: <component>/<prefix>/<source>/<source>_<version>
+# (the version without epoch; the prefix is 4 letters for lib* sources)
+changelog_path() {
+    local deb="$1" source version
+    source="$(dpkg-deb -f "$deb" Source)"
+    version="$(dpkg-deb -f "$deb" Version)"
+    case "$source" in
+        *"("*")"*)
+            version="${source#*(}"
+            version="${version%%)*}"
+            source="${source%% *}" ;;
+        "") source="$(dpkg-deb -f "$deb" Package)" ;;
+    esac
+    version="${version#*:}"
+    case "$source" in
+        lib*) echo "$COMPONENT/${source:0:4}/$source/${source}_$version" ;;
+        *) echo "$COMPONENT/${source:0:1}/$source/${source}_$version" ;;
+    esac
+}
 
 # Which suite does this .deb belong to?
 #
@@ -103,6 +131,21 @@ for deb in "${debs[@]}"; do
     pool="$OUTDIR/pool/$suite/$COMPONENT/${SOURCE_PACKAGE:0:1}/$SOURCE_PACKAGE"
     mkdir -p "$pool"
     cp "$deb" "$pool/"
+
+    # Changelog for `apt changelog`: all binaries of a source share one file
+    changelog="$OUTDIR/changelogs/$(changelog_path "$deb")_changelog"
+    if [ ! -e "$changelog" ]; then
+        package="$(dpkg-deb -f "$deb" Package)"
+        mkdir -p "$(dirname "$changelog")"
+        if dpkg-deb --fsys-tarfile "$deb" 2>/dev/null \
+            | tar -xO "./usr/share/doc/$package/changelog.Debian.gz" 2>/dev/null \
+            | gzip -dc > "$changelog.tmp" 2>/dev/null && [ -s "$changelog.tmp" ]; then
+            mv "$changelog.tmp" "$changelog"
+        else
+            log "no changelog.Debian.gz in $(basename "$deb")"
+            rm -f "$changelog.tmp"
+        fi
+    fi
 done
 
 # --- Index each suite -------------------------------------------------------
@@ -171,7 +214,16 @@ for suite in "${SUITES[@]}"; do
         -o APT::FTPArchive::Release::Architectures="${ARCHES[*]}" \
         -o APT::FTPArchive::Release::Components="$COMPONENT" \
         -o APT::FTPArchive::Release::Description="$DESCRIPTION" \
-        release "dists/$suite" > "dists/$suite/Release"
+        release "dists/$suite" > "dists/$suite/Release.new"
+
+    # Not every apt-ftparchive can write this field itself: add it ahead of the
+    # checksum sections
+    awk -v line="Changelogs: $BASE_URL/changelogs/@CHANGEPATH@_changelog" '
+        !done && /^(MD5Sum|SHA1|SHA256|SHA512):/ { print line; done = 1 }
+        { print }
+        END { if (!done) print line }
+    ' "dists/$suite/Release.new" > "dists/$suite/Release"
+    rm -f "dists/$suite/Release.new"
 
     if [ -n "$GPG_KEY" ]; then
         gpg --batch --yes --local-user "$GPG_KEY" \
@@ -208,9 +260,9 @@ for suite in "${SUITES[@]}"; do
 done
 
 if [ -f "$TEMPLATE" ]; then
-    sed -e "s|__FINGERPRINT__|$fingerprint|g" \
-        -e "s|__UPDATED__|$(date -u '+%Y-%m-%d %H:%M UTC')|g" \
-        -e "s|__VERSION_ROWS__|$version_rows|g" \
+    sed -e "s|__FINGERPRINT__|$(sed_escape "$fingerprint")|g" \
+        -e "s|__UPDATED__|$(sed_escape "$(date -u '+%Y-%m-%d %H:%M UTC')")|g" \
+        -e "s|__VERSION_ROWS__|$(sed_escape "$version_rows")|g" \
         "$TEMPLATE" > index.html
 else
     log "WARNING: $TEMPLATE not found, no landing page generated"
