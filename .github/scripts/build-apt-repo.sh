@@ -4,9 +4,10 @@
 #   [APT_REPO_URL=<url>] build-apt-repo.sh <incoming-dir> <output-dir> [gpg-key-id]
 #
 # APT_REPO_URL is the public address of the repository, without a trailing
-# slash (default: https://wmp.github.io/GlobalProtect-SAML-NetworkManager). It
-# ends up in the "Changelogs:" field of every Release file and on the landing
-# page, so set it when the repository is served from anywhere else (a local test
+# slash (default: https://wmp.github.io/GlobalProtect-SAML-NetworkManager); it
+# must be an http(s) URL without spaces. It ends up in the "Changelogs:" field of
+# the Release file of every suite that has a changelog, and on the landing page,
+# so set it when the repository is served from anywhere else (a local test
 # server, say).
 #
 # The repository is always rebuilt from scratch - GitHub Releases are the source
@@ -40,7 +41,9 @@ ARCHES=(amd64 arm64)
 COMPONENT="main"
 # Where the repository is served; `apt changelog` downloads from here
 APT_REPO_URL="${APT_REPO_URL:-https://wmp.github.io/GlobalProtect-SAML-NetworkManager}"
-APT_REPO_URL="${APT_REPO_URL%/}"
+while [[ "$APT_REPO_URL" == */ ]]; do APT_REPO_URL="${APT_REPO_URL%/}"; done
+[[ "$APT_REPO_URL" =~ ^https?://[^[:space:]]+$ ]] \
+    || { echo "[build-apt-repo] ERROR: APT_REPO_URL must be an http(s) URL without spaces, got '$APT_REPO_URL'" >&2; exit 1; }
 SOURCE_PACKAGE="network-manager-gpclient"
 # Ubuntu releases we build for; the suite name is the release codename
 SUITES=(jammy noble oracular resolute)
@@ -58,29 +61,28 @@ trap 'rm -f "$all_packages"; rm -rf "$tmpdir"' EXIT
 # backslash, & (the matched text) and the | delimiter are special there
 sed_escape() { printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
 
+# Escape a value for HTML text and attributes
+html_escape() {
+    printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' \
+        -e 's/"/\&quot;/g' -e "s/'/\&#39;/g"
+}
+
 # Fields of one .deb, read with a single dpkg-deb call: sets pkg, version,
-# source (only the name) and source_version (the version of the source package)
-# and arch. A "Source: name (version)" field carries its own version.
+# source (only the name), source_version (the version of the source package;
+# dpkg falls back to the package's own) and arch. dpkg-deb --show refuses a
+# malformed Source field; the package is then read without it and gets an
+# empty source, which changelog_path rejects (no changelog, the build goes on).
 read_control() {
-    local deb="$1" control line
-    control="$(dpkg-deb -f "$deb" Package Version Source Architecture)" || return 1
-    pkg="" version="" source="" arch=""
-    while IFS= read -r line; do
-        case "$line" in
-            Package:*) pkg="${line#*: }" ;;
-            Version:*) version="${line#*: }" ;;
-            Source:*) source="${line#*: }" ;;
-            Architecture:*) arch="${line#*: }" ;;
-        esac
-    done <<< "$control"
-    source_version="$version"
-    case "$source" in
-        *"("*")"*)
-            source_version="${source#*(}"
-            source_version="${source_version%%)*}"
-            source="${source%% *}" ;;
-        "") source="$pkg" ;;
-    esac
+    local deb="$1"
+    pkg="" version="" source="" source_version="" arch=""
+    if ! IFS=$'\t' read -r pkg version source source_version arch < <(
+            dpkg-deb --show --showformat='${Package}\t${Version}\t${source:Package}\t${source:Version}\t${Architecture}\n' \
+                "$deb" 2> /dev/null); then
+        source="" source_version=""
+        IFS=$'\t' read -r pkg version arch < <(
+            dpkg-deb --show --showformat='${Package}\t${Version}\t${Architecture}\n' "$deb") || true
+    fi
+    [ -n "$pkg" ] && [ -n "$version" ] && [ -n "$arch" ]
 }
 
 # Path of the changelog of the package read_control has just read, relative to
@@ -104,33 +106,37 @@ changelog_path() {
 # normal and only logged; a package that cannot be unpacked is an ERROR, but
 # the build goes on - the changelog is not worth losing the repository for.
 # debhelper installs changelog.Debian.gz, or changelog.gz when the package is
-# native (no Debian revision in the version).
+# native (no Debian revision in the version). The data archive is streamed, not
+# written to disk: first listed (member names may or may not start with "./"),
+# then the one member is extracted.
 extract_changelog() {
-    local deb="$1" package="$2" dest="$3" name="$(basename "$1")" member found=""
-    local tarball="$tmpdir/data.tar" list="$tmpdir/list" errors="$tmpdir/errors" out="$tmpdir/changelog"
+    local deb="$1" package="$2" dest="$3" name="$(basename "$1")" member found="" entry
+    local list="$tmpdir/list" errors="$tmpdir/errors" out="$tmpdir/changelog"
 
-    if ! dpkg-deb --fsys-tarfile "$deb" > "$tarball" 2> "$errors" \
-        || ! tar -tf "$tarball" > "$list" 2> "$errors"; then
-        err "cannot read the files of $name, no changelog: $(tr '\n' ' ' < "$errors")"
+    if ! { dpkg-deb --fsys-tarfile "$deb" 2> "$errors.dpkg" | tar -tf - > "$list" 2> "$errors"; }; then
+        err "cannot read the files of $name, no changelog: $(cat "$errors.dpkg" "$errors" | tr '\n' ' ')"
         return 1
     fi
     for member in changelog.Debian.gz changelog.gz; do
-        if grep -qxF "./usr/share/doc/$package/$member" "$list"; then
-            found="$member"
-            break
-        fi
+        while IFS= read -r entry; do
+            if [ "${entry#./}" = "usr/share/doc/$package/$member" ]; then
+                found="$entry"
+                break 2
+            fi
+        done < "$list"
     done
     if [ -z "$found" ]; then
         log "no changelog.Debian.gz or changelog.gz in $name"
         return 1
     fi
-    if ! tar -xOf "$tarball" "./usr/share/doc/$package/$found" 2> "$errors" \
-        | gzip -dc > "$out" 2> "$errors.gz"; then
-        err "cannot extract $found from $name: $(cat "$errors" "$errors.gz" | tr '\n' ' ')"
+    if ! { dpkg-deb --fsys-tarfile "$deb" 2> "$errors.dpkg" \
+            | tar -xOf - --no-wildcards -- "$found" 2> "$errors" \
+            | gzip -dc > "$out" 2> "$errors.gz"; }; then
+        err "cannot extract $found from $name: $(cat "$errors.dpkg" "$errors" "$errors.gz" | tr '\n' ' ')"
         return 1
     fi
     if [ ! -s "$out" ]; then
-        log "$found in $name is empty"
+        log "${found##*/} in $name is empty"
         return 1
     fi
     mkdir -p "$(dirname "$dest")"
@@ -184,6 +190,8 @@ shopt -u nullglob
 
 # Number of packages per "<suite>/<arch>" ("all" packages belong to every arch)
 declare -A pkg_count=()
+# Suites with at least one published changelog (they get the Changelogs field)
+declare -A suite_has_changelog=()
 
 for deb in "${debs[@]}"; do
     read_control "$deb" || die "cannot read the control data of $(basename "$deb")"
@@ -207,6 +215,7 @@ for deb in "${debs[@]}"; do
     if rel="$(changelog_path)"; then
         changelog="$OUTDIR/changelogs/${rel}_changelog"
         [ -e "$changelog" ] || extract_changelog "$deb" "$pkg" "$changelog" || true
+        [ ! -e "$changelog" ] || suite_has_changelog["$suite"]=1
     else
         log "WARNING: not publishing a changelog for $(basename "$deb"):" \
             "invalid source '$source' or version '$source_version'"
@@ -278,13 +287,18 @@ for suite in "${SUITES[@]}"; do
         release "dists/$suite" > "dists/$suite/Release.new"
 
     # Not every apt-ftparchive can write this field itself: add it ahead of the
-    # checksum sections
-    awk -v line="Changelogs: $APT_REPO_URL/changelogs/@CHANGEPATH@_changelog" '
-        !done && /^(MD5Sum|SHA1|SHA256|SHA512):/ { print line; done = 1 }
-        { print }
-        END { if (!done) print line }
-    ' "dists/$suite/Release.new" > "dists/$suite/Release"
-    rm -f "dists/$suite/Release.new"
+    # checksum sections, and only when this suite has a changelog to point to.
+    # The line goes in through the environment: awk -v would process backslashes.
+    if [ -n "${suite_has_changelog["$suite"]:-}" ]; then
+        CHANGELOGS_LINE="Changelogs: $APT_REPO_URL/changelogs/@CHANGEPATH@_changelog" awk '
+            !done && /^(MD5Sum|SHA1|SHA256|SHA512):/ { print ENVIRON["CHANGELOGS_LINE"]; done = 1 }
+            { print }
+            END { if (!done) print ENVIRON["CHANGELOGS_LINE"] }
+        ' "dists/$suite/Release.new" > "dists/$suite/Release"
+        rm -f "dists/$suite/Release.new"
+    else
+        mv "dists/$suite/Release.new" "dists/$suite/Release"
+    fi
 
     if [ -n "$GPG_KEY" ]; then
         gpg --batch --yes --local-user "$GPG_KEY" \
@@ -322,7 +336,7 @@ done
 
 if [ -f "$TEMPLATE" ]; then
     sed -e "s|__FINGERPRINT__|$(sed_escape "$fingerprint")|g" \
-        -e "s|__REPO_URL__|$(sed_escape "$APT_REPO_URL")|g" \
+        -e "s|__REPO_URL__|$(sed_escape "$(html_escape "$APT_REPO_URL")")|g" \
         -e "s|__UPDATED__|$(sed_escape "$(date -u '+%Y-%m-%d %H:%M UTC')")|g" \
         -e "s|__VERSION_ROWS__|$(sed_escape "$version_rows")|g" \
         "$TEMPLATE" > index.html

@@ -10,8 +10,8 @@ Landing page: the version table, the fingerprint (or the unsigned fallback) and 
 URL (APT_REPO_URL) are filled in literally.
 
 Changelogs: taken from changelog.Debian.gz or, in a native package, changelog.gz; published under
-changelogs/<component>/<prefix>/<source>/; announced once by the Changelogs field of every Release
-file, ahead of the checksum sections; a source or version that is not a plain name never reaches
+changelogs/<component>/<prefix>/<source>/; announced once by the Changelogs field of the Release
+file of every suite that has one, ahead of the checksum sections; a source or version that is not a plain name never reaches
 a path, and a package that cannot be unpacked is reported without stopping the build.
 
 The .deb files are real (dpkg-deb --build of an empty package); apt-ftparchive, which only writes
@@ -24,6 +24,7 @@ Run with: make test-unit  (or: python3 -m pytest tests/unit -v)
 
 import gzip
 import os
+import shutil
 import subprocess
 
 import pytest
@@ -248,16 +249,55 @@ class TestLandingPage:
         assert f"curl -fsSL {DEFAULT_URL}/gpclient-archive-keyring.gpg" in html
         assert "__REPO_URL__" not in html
 
-    def test_apt_repo_url_replaces_the_url_on_the_page_literally(self, repo):
+    def test_apt_repo_url_replaces_the_url_on_the_page_as_escaped_html(self, repo):
         repo.add(CORE, "1.5.0-1~noble1")
 
         result = repo.build(env={"APT_REPO_URL": "http://127.0.0.1:8000/a&b|c"})
 
         assert result.returncode == 0, result.stderr + result.stdout
         html = self.index_html(repo)
-        assert "curl -fsSL http://127.0.0.1:8000/a&b|c/gpclient-archive-keyring.gpg" in html
+        assert "curl -fsSL http://127.0.0.1:8000/a&amp;b|c/gpclient-archive-keyring.gpg" in html
         assert "wmp.github.io" not in html
         assert "__REPO_URL__" not in html
+
+    @pytest.mark.parametrize("url, escaped", [
+        ("http://h/<b>", "http://h/&lt;b&gt;"),
+        ("http://h/a\"b'c", "http://h/a&quot;b&#39;c"),
+        ("http://h/\\1&amp;", "http://h/\\1&amp;amp;"),
+    ])
+    def test_markup_in_the_url_never_reaches_the_page(self, repo, url, escaped):
+        repo.add(CORE, "1.5.0-1~noble1")
+
+        result = repo.build(env={"APT_REPO_URL": url})
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        html = self.index_html(repo)
+        assert f"curl -fsSL {escaped}/gpclient-archive-keyring.gpg" in html
+        assert "<b>" not in html
+        assert "a\"b" not in html
+
+
+def repack_deb(path, member_text=None, strip_dot_slash=False, name=None):
+    """Rebuild the data member of a .deb with tar: members without the leading "./" that dpkg-deb
+    writes (as other tools do), and/or the changelog replaced by raw bytes (not gzip, say)"""
+    work = path.parent / (path.name + ".repack")
+    tree = work / "tree"
+    tree.mkdir(parents=True)
+    subprocess.run(["dpkg-deb", "-R", str(path), str(tree)], check=True, capture_output=True)
+    shutil.rmtree(tree / "DEBIAN")
+    if member_text is not None:
+        for changelog in tree.rglob("changelog*.gz"):
+            changelog.write_bytes(member_text)
+    subprocess.run(["tar", "-cf", str(work / "data.tar"), "-C", str(tree)]
+                   + (["--transform", "s,^\\./,,"] if strip_dot_slash else []) + ["."],
+                   check=True, capture_output=True)
+    subprocess.run(["ar", "x", str(path)], cwd=work, check=True, capture_output=True)
+    for old in work.glob("data.tar.*"):
+        old.unlink()
+    control = next(work.glob("control.tar*")).name
+    path.unlink()
+    subprocess.run(["ar", "rc", str(path), "debian-binary", control, "data.tar"], cwd=work, check=True,
+                   capture_output=True)
 
 
 def corrupt_deb(path, member):
@@ -293,14 +333,26 @@ class TestChangelogs:
     def release(self, repo, suite="noble"):
         return (repo.out / "dists" / suite / "Release").read_text()
 
-    def test_every_release_file_names_the_changelog_location(self, repo):
+    def test_the_release_file_of_a_suite_with_a_changelog_names_its_location(self, repo):
         repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT)
+        repo.add(CORE, "1.5.0-1~resolute1", changelog=self.TEXT)
 
         result = repo.build()
 
         assert result.returncode == 0, result.stderr + result.stdout
-        for suite in ("jammy", "noble", "oracular", "resolute"):
+        for suite in ("noble", "resolute"):
             assert self.URL_LINE in self.release(repo, suite), suite
+
+    def test_a_suite_without_a_changelog_or_without_packages_gets_no_field(self, repo):
+        repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT)
+        repo.add(CORE, "1.5.0-1~resolute1")
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        for suite in ("jammy", "oracular", "resolute"):
+            assert self.release(repo, suite) == RELEASE, suite
+        assert self.URL_LINE in self.release(repo, "noble")
 
     def test_the_line_is_there_once_ahead_of_the_checksums_which_stay_intact(self, repo):
         repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT)
@@ -317,7 +369,7 @@ class TestChangelogs:
 
     def test_without_checksum_sections_the_line_is_added_at_the_end(self, repo):
         repo.release("Suite: noble\nCodename: noble\n")
-        repo.add(CORE, "1.5.0-1~noble1")
+        repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT)
 
         result = repo.build()
 
@@ -325,9 +377,9 @@ class TestChangelogs:
         assert self.release(repo) == "Suite: noble\nCodename: noble\n" + self.URL_LINE
 
     def test_apt_repo_url_sets_the_line_and_a_trailing_slash_does_not_matter(self, repo):
-        repo.add(CORE, "1.5.0-1~noble1")
+        repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT)
 
-        for url in ("http://127.0.0.1:8000", "http://127.0.0.1:8000/"):
+        for url in ("http://127.0.0.1:8000", "http://127.0.0.1:8000/", "http://127.0.0.1:8000///"):
             result = repo.build(env={"APT_REPO_URL": url})
 
             assert result.returncode == 0, result.stderr + result.stdout
@@ -336,7 +388,7 @@ class TestChangelogs:
             assert not [line for line in lines if "wmp.github.io" in line]
 
     def test_a_stray_base_url_in_the_environment_changes_nothing(self, repo):
-        repo.add(CORE, "1.5.0-1~noble1")
+        repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT)
 
         result = repo.build(env={"BASE_URL": "https://evil.example"})
 
@@ -447,3 +499,88 @@ class TestChangelogs:
         assert self.changelogs(repo) == []
         assert self.directories(repo) == []
         assert f"Package: {CORE}\n" in repo.index("noble", "amd64")
+
+    def test_member_names_without_a_leading_dot_slash_are_found(self, repo):
+        deb = repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT)
+        repack_deb(deb, strip_dot_slash=True)
+        listing = subprocess.run(["dpkg-deb", "--fsys-tarfile", str(deb)], capture_output=True).stdout
+        names = subprocess.run(["tar", "-tf", "-"], input=listing, capture_output=True).stdout.decode()
+        assert f"usr/share/doc/{CORE}/changelog.Debian.gz" in names.splitlines()
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert self.changelogs(repo) == [f"main/n/{CORE}/{CORE}_1.5.0-1~noble1_changelog"]
+        assert (repo.out / "changelogs/main/n" / CORE / f"{CORE}_1.5.0-1~noble1_changelog").read_text() == self.TEXT
+
+    def test_without_a_dot_slash_a_package_with_no_changelog_is_still_only_logged(self, repo):
+        deb = repo.add(CORE, "1.5.0-1~noble1")
+        repack_deb(deb, strip_dot_slash=True)
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert "no changelog.Debian.gz or changelog.gz" in result.stdout
+        assert "ERROR" not in result.stderr
+        assert self.changelogs(repo) == []
+
+    def test_a_changelog_that_is_not_gzip_is_reported_and_the_build_goes_on(self, repo):
+        deb = repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT)
+        repack_deb(deb, member_text=b"this is not gzip\n" * 20)
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert "ERROR: cannot extract" in result.stderr
+        assert deb.name in result.stderr
+        assert self.changelogs(repo) == []
+        assert self.directories(repo) == []
+        assert self.URL_LINE not in self.release(repo)
+        assert f"Package: {CORE}\n" in repo.index("noble", "amd64")
+
+    def test_an_empty_changelog_is_not_published(self, repo):
+        repo.add(CORE, "1.5.0-1~noble1", changelog="")
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert "changelog.Debian.gz in" in result.stdout and "is empty" in result.stdout
+        assert "ERROR" not in result.stderr
+        assert self.changelogs(repo) == []
+        assert self.directories(repo) == []
+        assert self.URL_LINE not in self.release(repo)
+
+    def test_a_backslash_in_the_url_reaches_the_release_file_and_the_page_literally(self, repo):
+        repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT)
+
+        result = repo.build(env={"APT_REPO_URL": "http://h/a\\nb\\tc\\\\d"})
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert "Changelogs: http://h/a\\nb\\tc\\\\d/changelogs/@CHANGEPATH@_changelog" in self.release(repo).splitlines()
+        assert "curl -fsSL http://h/a\\nb\\tc\\\\d/gpclient-archive-keyring.gpg" in (repo.out / "index.html").read_text()
+
+
+class TestRepositoryUrl:
+    @pytest.mark.parametrize("url, expected", [
+        ("http://h//", "http://h"),
+        ("https://h/p///", "https://h/p"),
+        ("", DEFAULT_URL),
+    ])
+    def test_trailing_slashes_are_stripped_and_empty_means_the_default(self, repo, url, expected):
+        repo.add(CORE, "1.5.0-1~noble1", changelog=TestChangelogs.TEXT)
+
+        result = repo.build(env={"APT_REPO_URL": url})
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        release = (repo.out / "dists" / "noble" / "Release").read_text().splitlines()
+        assert f"Changelogs: {expected}/changelogs/@CHANGEPATH@_changelog" in release
+
+    @pytest.mark.parametrize("url", ["/", "ftp://x", "http://", "http:///", "http://a b", "http://a\tb", "x.example", " http://h"])
+    def test_a_value_that_is_not_an_http_url_without_spaces_stops_the_script(self, repo, url):
+        repo.add(CORE, "1.5.0-1~noble1")
+
+        result = repo.build(env={"APT_REPO_URL": url})
+
+        assert result.returncode != 0
+        assert "ERROR: APT_REPO_URL must be an http(s) URL" in result.stderr
+        assert not (repo.out / "dists").exists()

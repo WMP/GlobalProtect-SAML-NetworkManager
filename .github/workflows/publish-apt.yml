@@ -82,11 +82,14 @@ jobs:
           done < tags.txt
           ls -la incoming
 
-      - name: Build the repository
-        run: bash .github/scripts/build-apt-repo.sh incoming site "$APT_GPG_KEY"
-
       - name: Configure Pages
+        id: pages
         uses: actions/configure-pages@v5
+
+      - name: Build the repository
+        env:
+          APT_REPO_URL: ${{ steps.pages.outputs.base_url }}
+        run: bash .github/scripts/build-apt-repo.sh incoming site "$APT_GPG_KEY"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
