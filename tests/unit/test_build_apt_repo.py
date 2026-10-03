@@ -56,9 +56,37 @@ SHA256:
 """
 
 
-def make_deb(directory, package, version, arch="amd64", source=None, changelog=None, native_changelog=None):
+# dpkg-deb that appends its first argument to calls.log next to it (one line per call) and answers
+# --show itself, with the fields named in $FAKE_EMPTY ("," separated, e.g. "source:Package") left
+# empty; everything else goes to the real dpkg-deb
+FAKE_DPKG_DEB = r"""#!/usr/bin/env python3
+import os, subprocess, sys
+here = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(here, "calls.log"), "a") as log:
+    log.write(sys.argv[1] + "\n")
+if sys.argv[1] == "--show":
+    fmt = [a for a in sys.argv if a.startswith("--showformat=")][0][len("--showformat="):]
+    got = subprocess.run(["/usr/bin/dpkg-deb", "-f", sys.argv[-1], "Package", "Version", "Architecture"],
+                         capture_output=True, text=True).stdout
+    info = dict(line.split(": ", 1) for line in got.splitlines())
+    values = {"Package": info["Package"], "Version": info["Version"], "Architecture": info["Architecture"],
+              "source:Package": info["Package"], "source:Version": info["Version"]}
+    for name in os.environ.get("FAKE_EMPTY", "").split(","):
+        if name:
+            values[name] = ""
+    for name, value in values.items():
+        fmt = fmt.replace("${%s}" % name, value)
+    sys.stdout.write(fmt.replace("\\n", "\n"))
+    sys.exit(0)
+os.execv("/usr/bin/dpkg-deb", ["dpkg-deb"] + sys.argv[1:])
+"""
+
+
+def make_deb(directory, package, version, arch="amd64", source=None, changelog=None, native_changelog=None,
+             changelog_symlink_to=None):
     """A real, empty .deb; returns its path. changelog is installed as changelog.Debian.gz,
-    native_changelog as changelog.gz (what debhelper does for a version without a Debian revision)"""
+    native_changelog as changelog.gz (what debhelper does for a version without a Debian revision);
+    changelog_symlink_to makes changelog.Debian.gz a symlink to that path instead"""
     root = directory / f"{package}_{version}_{arch}"
     (root / "DEBIAN").mkdir(parents=True)
     (root / "DEBIAN" / "control").write_text(
@@ -71,6 +99,10 @@ def make_deb(directory, package, version, arch="amd64", source=None, changelog=N
             doc = root / "usr" / "share" / "doc" / package
             doc.mkdir(parents=True, exist_ok=True)
             (doc / name).write_bytes(gzip.compress(text.encode()))
+    if changelog_symlink_to is not None:
+        doc = root / "usr" / "share" / "doc" / package
+        doc.mkdir(parents=True, exist_ok=True)
+        (doc / "changelog.Debian.gz").symlink_to(changelog_symlink_to)
     deb = directory / f"{package}_{version}_{arch}.deb"
     subprocess.run(["dpkg-deb", "--build", str(root), str(deb)], check=True, capture_output=True)
     return deb
@@ -102,6 +134,12 @@ class Repo:
         full_env = {"PATH": f"{self.bin}:/usr/bin:/bin", **(env or {})}
         args = ["bash", SCRIPT, str(self.incoming), str(self.out)] + ([key] if key else [])
         return subprocess.run(args, env=full_env, capture_output=True, text=True, timeout=120)
+
+    def fake_dpkg_deb(self):
+        """Put the counting dpkg-deb first in PATH; returns the lines of its log (the first argument of each call)"""
+        (self.bin / "dpkg-deb").write_text(FAKE_DPKG_DEB)
+        (self.bin / "dpkg-deb").chmod(0o755)
+        return lambda: (self.bin / "calls.log").read_text().splitlines() if (self.bin / "calls.log").exists() else []
 
     def index(self, suite, arch):
         path = self.out / "dists" / suite / "main" / f"binary-{arch}" / "Packages"
@@ -249,32 +287,16 @@ class TestLandingPage:
         assert f"curl -fsSL {DEFAULT_URL}/gpclient-archive-keyring.gpg" in html
         assert "__REPO_URL__" not in html
 
-    def test_apt_repo_url_replaces_the_url_on_the_page_as_escaped_html(self, repo):
+    def test_apt_repo_url_replaces_the_url_on_the_page(self, repo):
         repo.add(CORE, "1.5.0-1~noble1")
 
-        result = repo.build(env={"APT_REPO_URL": "http://127.0.0.1:8000/a&b|c"})
+        result = repo.build(env={"APT_REPO_URL": "http://127.0.0.1:8000/a%20b~c_d.e-f"})
 
         assert result.returncode == 0, result.stderr + result.stdout
         html = self.index_html(repo)
-        assert "curl -fsSL http://127.0.0.1:8000/a&amp;b|c/gpclient-archive-keyring.gpg" in html
+        assert "curl -fsSL http://127.0.0.1:8000/a%20b~c_d.e-f/gpclient-archive-keyring.gpg" in html
         assert "wmp.github.io" not in html
         assert "__REPO_URL__" not in html
-
-    @pytest.mark.parametrize("url, escaped", [
-        ("http://h/<b>", "http://h/&lt;b&gt;"),
-        ("http://h/a\"b'c", "http://h/a&quot;b&#39;c"),
-        ("http://h/\\1&amp;", "http://h/\\1&amp;amp;"),
-    ])
-    def test_markup_in_the_url_never_reaches_the_page(self, repo, url, escaped):
-        repo.add(CORE, "1.5.0-1~noble1")
-
-        result = repo.build(env={"APT_REPO_URL": url})
-
-        assert result.returncode == 0, result.stderr + result.stdout
-        html = self.index_html(repo)
-        assert f"curl -fsSL {escaped}/gpclient-archive-keyring.gpg" in html
-        assert "<b>" not in html
-        assert "a\"b" not in html
 
 
 def repack_deb(path, member_text=None, strip_dot_slash=False, name=None):
@@ -450,6 +472,82 @@ class TestChangelogs:
         assert result.returncode == 0, result.stderr + result.stdout
         assert self.changelogs(repo) == ["main/libf/libfoo/libfoo_1.0-1~noble1_changelog"]
 
+    def published(self, repo, prefix="n", source=CORE, version="1.5.0-1~noble1"):
+        return (repo.out / "changelogs/main" / prefix / source / f"{source}_{version}_changelog").read_text()
+
+    def test_the_package_named_like_the_source_publishes_the_changelog_even_when_another_binary_sorts_first(self, repo):
+        # "network-manager-gpclient-plasma-6_..." sorts before "network-manager-gpclient_..." in the glob
+        repo.add(PLASMA6, "1.5.0-1~noble1", source=f"{CORE} (1.5.0-1~noble1)", changelog="plasma\n")
+        repo.add(CORE, "1.5.0-1~noble1", changelog="core\n")
+        repo.add(CORE, "1.5.0-1~noble1", "arm64", changelog="core arm64\n")
+        assert sorted(os.listdir(repo.incoming))[0].startswith(PLASMA6)
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert self.published(repo) == "core\n"
+        assert self.changelogs(repo) == [f"main/n/{CORE}/{CORE}_1.5.0-1~noble1_changelog"]
+
+    def test_the_core_package_does_not_replace_the_changelog_when_it_has_none(self, repo):
+        repo.add(PLASMA6, "1.5.0-1~noble1", source=f"{CORE} (1.5.0-1~noble1)", changelog="plasma\n")
+        repo.add(CORE, "1.5.0-1~noble1")
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert self.published(repo) == "plasma\n"
+
+    def test_without_the_core_package_the_first_binary_in_glob_order_publishes_the_changelog(self, repo):
+        repo.add("libfoo1", "1.0-1~noble1", source="libfoo (1.0-1~noble1)", changelog="one\n")
+        repo.add("libfoo-data", "1.0-1~noble1", source="libfoo (1.0-1~noble1)", changelog="data\n")
+        assert sorted(os.listdir(repo.incoming))[0].startswith("libfoo-data")
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert self.published(repo, "libf", "libfoo", "1.0-1~noble1") == "data\n"
+        assert self.changelogs(repo) == ["main/libf/libfoo/libfoo_1.0-1~noble1_changelog"]
+
+    @pytest.mark.parametrize("with_changelog", [True, False])
+    def test_the_data_archive_of_a_package_is_read_once(self, repo, with_changelog):
+        calls = repo.fake_dpkg_deb()
+        repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT if with_changelog else None)
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert calls().count("--fsys-tarfile") == 1
+        assert bool(self.changelogs(repo)) == with_changelog
+
+    def test_a_changelog_that_is_a_symlink_is_not_followed(self, repo, tmp_path):
+        secret = tmp_path / "secret.gz"
+        secret.write_bytes(gzip.compress(b"secret\n"))
+        repo.add(CORE, "1.5.0-1~noble1", changelog_symlink_to=str(secret))
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert self.changelogs(repo) == []
+        assert "no changelog.Debian.gz or changelog.gz" in result.stdout
+
+    @pytest.mark.parametrize("empty, published", [
+        ("source:Package", False),   # no source: no changelog, but the package is indexed
+        ("", True),                  # nothing empty: the changelog is published
+        ("source:Version", False),
+    ])
+    def test_an_empty_field_does_not_shift_the_ones_after_it(self, repo, empty, published):
+        repo.fake_dpkg_deb()
+        repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT)
+
+        result = repo.build(env={"FAKE_EMPTY": empty})
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert bool(self.changelogs(repo)) == published
+        if not published:
+            assert "not publishing a changelog" in result.stdout
+        # version and architecture were still read: the package is in its suite and index
+        assert f"Package: {CORE}\n" in repo.index("noble", "amd64")
+
     def test_a_package_without_a_changelog_does_not_break_the_build(self, repo):
         repo.add(CORE, "1.5.0-1~noble1")
 
@@ -468,10 +566,8 @@ class TestChangelogs:
         "a/b",
         "Upper",
         "-dash",
-        "x..y",
         "libfoo (../../dists/x)",
         "libfoo (1.0/../../x)",
-        "libfoo (1..0)",
         "libfoo ()",
     ])
     def test_a_source_or_version_that_is_not_a_plain_name_is_not_used_in_a_path(self, repo, tmp_path, source):
@@ -485,6 +581,15 @@ class TestChangelogs:
         assert not (repo.out / "dists" / "x").exists()
         assert self.directories(repo) == []
         assert "Package: libfoo1\n" in repo.index("noble", "amd64")
+
+    def test_dots_inside_a_name_are_not_a_path_traversal(self, repo, tmp_path):
+        repo.add("libfoo1", "1..0-1~noble1", source="x..y (1..0-1~noble1)", changelog="foo\n")
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert self.changelogs(repo) == ["main/x/x..y/x..y_1..0-1~noble1_changelog"]
+        assert [p for p in tmp_path.rglob("*_changelog")] == [repo.out / "changelogs/main/x/x..y/x..y_1..0-1~noble1_changelog"]
 
     @pytest.mark.parametrize("member", ["data.tar.gz", "data.tar"])
     def test_a_package_that_cannot_be_unpacked_is_reported_and_the_build_goes_on(self, repo, member):
@@ -550,15 +655,6 @@ class TestChangelogs:
         assert self.directories(repo) == []
         assert self.URL_LINE not in self.release(repo)
 
-    def test_a_backslash_in_the_url_reaches_the_release_file_and_the_page_literally(self, repo):
-        repo.add(CORE, "1.5.0-1~noble1", changelog=self.TEXT)
-
-        result = repo.build(env={"APT_REPO_URL": "http://h/a\\nb\\tc\\\\d"})
-
-        assert result.returncode == 0, result.stderr + result.stdout
-        assert "Changelogs: http://h/a\\nb\\tc\\\\d/changelogs/@CHANGEPATH@_changelog" in self.release(repo).splitlines()
-        assert "curl -fsSL http://h/a\\nb\\tc\\\\d/gpclient-archive-keyring.gpg" in (repo.out / "index.html").read_text()
-
 
 class TestRepositoryUrl:
     @pytest.mark.parametrize("url, expected", [
@@ -575,8 +671,14 @@ class TestRepositoryUrl:
         release = (repo.out / "dists" / "noble" / "Release").read_text().splitlines()
         assert f"Changelogs: {expected}/changelogs/@CHANGEPATH@_changelog" in release
 
-    @pytest.mark.parametrize("url", ["/", "ftp://x", "http://", "http:///", "http://a b", "http://a\tb", "x.example", " http://h"])
-    def test_a_value_that_is_not_an_http_url_without_spaces_stops_the_script(self, repo, url):
+    @pytest.mark.parametrize("url", [
+        "/", "ftp://x", "http://", "http:///", "http://a b", "http://a\tb", "x.example", " http://h",
+        "http://h/a\"b", "http://h/a'b", "http://h/<b>", "http://h/a>b", "http://h/a&b", "http://h/a|b",
+        "http://h/a`b", "http://h/$b", "http://h/$(id)", "http://h/a;b", "http://h/a\nb", "http://h/a\n",
+        "http://h/a\\b", "http://h/a#b", "http://h/a?b", "http://h/a=b", "http://h/a@b", "http://h/a(b)",
+        "http://h/a*b", "http://h/\u00e9", "http://h/a\x01b",
+    ])
+    def test_a_value_that_is_not_a_plain_http_url_stops_the_script(self, repo, url):
         repo.add(CORE, "1.5.0-1~noble1")
 
         result = repo.build(env={"APT_REPO_URL": url})
@@ -584,3 +686,15 @@ class TestRepositoryUrl:
         assert result.returncode != 0
         assert "ERROR: APT_REPO_URL must be an http(s) URL" in result.stderr
         assert not (repo.out / "dists").exists()
+        assert not (repo.out / "index.html").exists()
+
+    @pytest.mark.parametrize("url", [
+        "http://127.0.0.1:8000", "https://h.example/a_b/c~d-e.f", "http://h/a%20b", "https://H/P",
+    ])
+    def test_a_url_of_plain_characters_is_accepted(self, repo, url):
+        repo.add(CORE, "1.5.0-1~noble1", changelog=TestChangelogs.TEXT)
+
+        result = repo.build(env={"APT_REPO_URL": url})
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert f"Changelogs: {url}/changelogs/@CHANGEPATH@_changelog" in (repo.out / "dists/noble/Release").read_text().splitlines()

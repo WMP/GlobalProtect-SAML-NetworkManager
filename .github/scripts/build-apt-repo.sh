@@ -5,10 +5,11 @@
 #
 # APT_REPO_URL is the public address of the repository, without a trailing
 # slash (default: https://wmp.github.io/GlobalProtect-SAML-NetworkManager); it
-# must be an http(s) URL without spaces. It ends up in the "Changelogs:" field of
-# the Release file of every suite that has a changelog, and on the landing page,
-# so set it when the repository is served from anywhere else (a local test
-# server, say).
+# must be an http(s) URL made of the characters A-Z a-z 0-9 . _ ~ : / % - only
+# (anything else is unsafe on the HTML page and in sed, and refused). It ends up
+# in the "Changelogs:" field of the Release file of every suite that has a
+# changelog, and on the landing page, so set it when the repository is served
+# from anywhere else (a local test server, say).
 #
 # The repository is always rebuilt from scratch - GitHub Releases are the source
 # of truth, this tree is a derived artifact. Without a key id the repository is
@@ -41,9 +42,6 @@ ARCHES=(amd64 arm64)
 COMPONENT="main"
 # Where the repository is served; `apt changelog` downloads from here
 APT_REPO_URL="${APT_REPO_URL:-https://wmp.github.io/GlobalProtect-SAML-NetworkManager}"
-while [[ "$APT_REPO_URL" == */ ]]; do APT_REPO_URL="${APT_REPO_URL%/}"; done
-[[ "$APT_REPO_URL" =~ ^https?://[^[:space:]]+$ ]] \
-    || { echo "[build-apt-repo] ERROR: APT_REPO_URL must be an http(s) URL without spaces, got '$APT_REPO_URL'" >&2; exit 1; }
 SOURCE_PACKAGE="network-manager-gpclient"
 # Ubuntu releases we build for; the suite name is the release codename
 SUITES=(jammy noble oracular resolute)
@@ -56,6 +54,10 @@ die() { err "$*"; exit 1; }
 tmpdir="$(mktemp -d)"
 all_packages=""
 trap 'rm -f "$all_packages"; rm -rf "$tmpdir"' EXIT
+
+while [[ "$APT_REPO_URL" == */ ]]; do APT_REPO_URL="${APT_REPO_URL%/}"; done
+[[ "$APT_REPO_URL" =~ ^https?://[A-Za-z0-9._~:/%-]+$ ]] \
+    || die "APT_REPO_URL must be an http(s) URL made of A-Z a-z 0-9 . _ ~ : / % - only, got '$APT_REPO_URL'"
 
 # Escape a value for the replacement part of a sed "s|...|...|" command:
 # backslash, & (the matched text) and the | delimiter are special there
@@ -72,15 +74,17 @@ html_escape() {
 # dpkg falls back to the package's own) and arch. dpkg-deb --show refuses a
 # malformed Source field; the package is then read without it and gets an
 # empty source, which changelog_path rejects (no changelog, the build goes on).
+# The fields are separated by the unit separator (0x1f): unlike a tab it is not
+# IFS whitespace, so an empty field stays empty instead of shifting the rest.
 read_control() {
-    local deb="$1"
+    local deb="$1" sep=$'\x1f'
     pkg="" version="" source="" source_version="" arch=""
-    if ! IFS=$'\t' read -r pkg version source source_version arch < <(
-            dpkg-deb --show --showformat='${Package}\t${Version}\t${source:Package}\t${source:Version}\t${Architecture}\n' \
+    if ! IFS="$sep" read -r pkg version source source_version arch < <(
+            dpkg-deb --show --showformat="\${Package}$sep\${Version}$sep\${source:Package}$sep\${source:Version}$sep\${Architecture}\n" \
                 "$deb" 2> /dev/null); then
         source="" source_version=""
-        IFS=$'\t' read -r pkg version arch < <(
-            dpkg-deb --show --showformat='${Package}\t${Version}\t${Architecture}\n' "$deb") || true
+        IFS="$sep" read -r pkg version arch < <(
+            dpkg-deb --show --showformat="\${Package}$sep\${Version}$sep\${Architecture}\n" "$deb") || true
     fi
     [ -n "$pkg" ] && [ -n "$version" ] && [ -n "$arch" ]
 }
@@ -89,13 +93,13 @@ read_control() {
 # the "Changelogs:" base URL, in the layout apt expects:
 # <component>/<prefix>/<source>/<source>_<version> (the version without epoch;
 # the prefix is 4 letters for lib* sources). Source and version come from the
-# package and end up in a path, so anything but a plain name is refused.
+# package and end up in a path, so anything but a plain name is refused. No
+# separate check for ".." is needed: neither pattern allows a "/", the source
+# cannot start with a dot and the file name is <source>_<version>, so no path
+# component can ever be ".." (a ".." inside a longer name is just a name).
 changelog_path() {
     local v="${source_version#*:}"
-    if ! [[ "$source" =~ ^[a-z0-9][a-z0-9.+-]*$ && "$v" =~ ^[0-9A-Za-z.+~-]+$ ]] \
-        || [[ "$source$v" == *..* ]]; then
-        return 1
-    fi
+    [[ "$source" =~ ^[a-z0-9][a-z0-9.+-]*$ && "$v" =~ ^[0-9A-Za-z.+~-]+$ ]] || return 1
     case "$source" in
         lib*) echo "$COMPONENT/${source:0:4}/$source/${source}_$v" ;;
         *) echo "$COMPONENT/${source:0:1}/$source/${source}_$v" ;;
@@ -106,33 +110,44 @@ changelog_path() {
 # normal and only logged; a package that cannot be unpacked is an ERROR, but
 # the build goes on - the changelog is not worth losing the repository for.
 # debhelper installs changelog.Debian.gz, or changelog.gz when the package is
-# native (no Debian revision in the version). The data archive is streamed, not
-# written to disk: first listed (member names may or may not start with "./"),
-# then the one member is extracted.
+# native (no Debian revision in the version). The data archive is read once, as
+# a stream: tar unpacks just the candidates (member names may or may not start
+# with "./") into a scratch directory, and changelog.Debian.gz is preferred.
+# tar complains about every name that matched nothing, which is expected and
+# ignored (LC_ALL=C keeps the messages recognisable); any other message is a
+# real error. A candidate that is not a regular file (a symlink could point
+# anywhere) is not used.
 extract_changelog() {
-    local deb="$1" package="$2" dest="$3" name="$(basename "$1")" member found="" entry
-    local list="$tmpdir/list" errors="$tmpdir/errors" out="$tmpdir/changelog"
+    local deb="$1" package="$2" dest="$3" name="$(basename "$1")" member found="" statuses
+    local dir="$tmpdir/unpacked" errors="$tmpdir/errors" out="$tmpdir/changelog"
+    local doc="usr/share/doc/$package" ignored='^tar: (.*: Not found in archive|Exiting with failure status due to previous errors)$'
 
-    if ! { dpkg-deb --fsys-tarfile "$deb" 2> "$errors.dpkg" | tar -tf - > "$list" 2> "$errors"; }; then
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    set +e
+    dpkg-deb --fsys-tarfile "$deb" 2> "$errors.dpkg" \
+        | LC_ALL=C tar -xf - -C "$dir" --no-same-owner --no-same-permissions --anchored --wildcards -- \
+            "$doc/changelog.Debian.gz" "./$doc/changelog.Debian.gz" \
+            "$doc/changelog.gz" "./$doc/changelog.gz" 2> "$errors.tar"
+    statuses=("${PIPESTATUS[@]}")
+    set -e
+    grep -Ev "$ignored" "$errors.tar" > "$errors" || true
+    if [ "${statuses[0]}" -ne 0 ] || { [ "${statuses[1]}" -ne 0 ] && { [ "${statuses[1]}" -ne 2 ] || [ -s "$errors" ]; }; }; then
         err "cannot read the files of $name, no changelog: $(cat "$errors.dpkg" "$errors" | tr '\n' ' ')"
         return 1
     fi
     for member in changelog.Debian.gz changelog.gz; do
-        while IFS= read -r entry; do
-            if [ "${entry#./}" = "usr/share/doc/$package/$member" ]; then
-                found="$entry"
-                break 2
-            fi
-        done < "$list"
+        if [ -f "$dir/$doc/$member" ] && [ ! -L "$dir/$doc/$member" ]; then
+            found="$dir/$doc/$member"
+            break
+        fi
     done
     if [ -z "$found" ]; then
         log "no changelog.Debian.gz or changelog.gz in $name"
         return 1
     fi
-    if ! { dpkg-deb --fsys-tarfile "$deb" 2> "$errors.dpkg" \
-            | tar -xOf - --no-wildcards -- "$found" 2> "$errors" \
-            | gzip -dc > "$out" 2> "$errors.gz"; }; then
-        err "cannot extract $found from $name: $(cat "$errors.dpkg" "$errors" "$errors.gz" | tr '\n' ' ')"
+    if ! gzip -dc < "$found" > "$out" 2> "$errors.gz"; then
+        err "cannot extract ${found##*/} from $name: $(cat "$errors.gz" | tr '\n' ' ')"
         return 1
     fi
     if [ ! -s "$out" ]; then
@@ -192,6 +207,10 @@ shopt -u nullglob
 declare -A pkg_count=()
 # Suites with at least one published changelog (they get the Changelogs field)
 declare -A suite_has_changelog=()
+# Changelog files that come from the core package of their source (the package
+# named like the source); the first binary of a source publishes the file, the
+# core package replaces it
+declare -A changelog_from_core=()
 
 for deb in "${debs[@]}"; do
     read_control "$deb" || die "cannot read the control data of $(basename "$deb")"
@@ -211,10 +230,16 @@ for deb in "${debs[@]}"; do
     mkdir -p "$pool"
     cp "$deb" "$pool/"
 
-    # Changelog for `apt changelog`: all binaries of a source share one file
+    # Changelog for `apt changelog`: all binaries of a source share one file.
+    # The first one found is published; the package named like the source (the
+    # core package) takes over, as its changelog is the one that describes it.
     if rel="$(changelog_path)"; then
         changelog="$OUTDIR/changelogs/${rel}_changelog"
-        [ -e "$changelog" ] || extract_changelog "$deb" "$pkg" "$changelog" || true
+        if [ ! -e "$changelog" ] || { [ "$pkg" = "$source" ] && [ -z "${changelog_from_core["$changelog"]:-}" ]; }; then
+            if extract_changelog "$deb" "$pkg" "$changelog" && [ "$pkg" = "$source" ]; then
+                changelog_from_core["$changelog"]=1
+            fi
+        fi
         [ ! -e "$changelog" ] || suite_has_changelog["$suite"]=1
     else
         log "WARNING: not publishing a changelog for $(basename "$deb"):" \

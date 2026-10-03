@@ -43,7 +43,10 @@ does not publish.
 
 `apt changelog network-manager-gpclient` shows the changelog: it is published under
 `/changelogs/<component>/<prefix>/<source>/<source>_<version>_changelog` (not next to
-the packages) and announced by the `Changelogs` field of every `Release` file.
+the packages) and announced by the `Changelogs` field of the `Release` file of every
+suite that has at least one changelog (a suite without any gets no field). The field is
+per suite, not per package version: `apt changelog` for a version whose changelog could
+not be extracted (a package without one, or one that cannot be unpacked) gets a 404.
 
 Supported suites are Ubuntu release codenames: `jammy` (22.04), `noble` (24.04),
 `resolute` (26.04). Both `amd64` and `arm64` are built; apt picks the one matching
@@ -134,6 +137,10 @@ address the repository is served from. Without it `apt changelog` and the instal
 on the landing page point at the public site instead of your test server. The changelog of a
 package is taken from `changelog.Debian.gz`, or from `changelog.gz` in a native package;
 a package without one, or that cannot be unpacked (reported as `ERROR`), does not stop the build.
+When several packages of one source share the file, the one named like the source (the core
+package) provides it, otherwise the first in file name order. `APT_REPO_URL` must be an
+`http(s)` URL of the characters `A-Z a-z 0-9 . _ ~ : / % -` only; anything else stops the
+build, as it is unsafe on the landing page.
 
 Leaving out the key id builds an unsigned repository, which apt only accepts
 with `[trusted=yes]` - useful for a quick structural check, never for publishing.
