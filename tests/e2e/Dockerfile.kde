@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
-# README demo image: real KDE Plasma 6.6 desktop (Ubuntu 26.04, X11) with the
+# End-to-end test image: real KDE Plasma 6.6 desktop (Ubuntu 26.04, X11) with the
 # plugins built from this repository. Build from the repository root with
-# demo/record.sh (or: docker build -f demo/Dockerfile.kde -t gpclient-demo-kde .).
+# tests/e2e/run.sh (or: docker build -f tests/e2e/Dockerfile.kde -t gpclient-demo-kde .).
 # amd64 only (Microsoft Edge).
 
 FROM ubuntu:26.04 AS builder
@@ -18,8 +18,8 @@ COPY plugins/plasma plugins/plasma
 COPY service service
 COPY scripts scripts
 COPY config config
-COPY demo/install-plugin.sh demo/install-plugin.sh
-RUN demo/install-plugin.sh kde /src /stage
+COPY tests/e2e/install-plugin.sh tests/e2e/install-plugin.sh
+RUN tests/e2e/install-plugin.sh kde /src /stage
 
 FROM ubuntu:26.04
 ENV DEBIAN_FRONTEND=noninteractive
@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         kubuntu-wallpapers dolphin \
     && rm -rf /var/lib/apt/lists/*
 
-COPY demo/edge-policy.json demo/install-edge.sh /tmp/demo-edge/
+COPY tests/e2e/edge-policy.json tests/e2e/install-edge.sh /tmp/demo-edge/
 RUN --mount=type=secret,id=extra_ca,required=false,mode=0444 \
     /tmp/demo-edge/install-edge.sh /tmp/demo-edge/edge-policy.json \
     && rm -rf /tmp/demo-edge /var/lib/apt/lists/*
@@ -44,14 +44,15 @@ RUN userdel -r ubuntu \
     && useradd -m -u 1000 -s /bin/bash -c "Alex Morgan" demo
 
 COPY --from=builder /stage/ /
-COPY demo/files/gpclient demo/files/gpauth /usr/bin/
-COPY demo/files/loginctl /usr/local/bin/loginctl
-COPY demo/files/sso-server.py demo/files/make-certs.sh /opt/gp-demo/
-COPY demo/files/www /opt/gp-demo/www
-COPY demo/lib.sh /opt/gp-demo/lib.sh
-COPY demo/session /opt/gp-demo/session
-COPY demo/scenario-kde.sh /opt/gp-demo/scenario.sh
-COPY demo/99-demo.conf /etc/NetworkManager/conf.d/99-demo.conf
+COPY tests/e2e/files/gpclient tests/e2e/files/gpauth /usr/bin/
+COPY tests/e2e/files/loginctl /usr/local/bin/loginctl
+COPY tests/e2e/files/sso-server.py tests/e2e/files/make-certs.sh /opt/gp-demo/
+COPY tests/e2e/files/www /opt/gp-demo/www
+COPY tests/e2e/lib.sh /opt/gp-demo/lib.sh
+COPY tests/e2e/session /opt/gp-demo/session
+COPY tests/e2e/scenario-*.sh /opt/gp-demo/scenarios/
+COPY tests/e2e/checks.py /opt/gp-demo/checks.py
+COPY tests/e2e/99-demo.conf /etc/NetworkManager/conf.d/99-demo.conf
 
 # Fictional CA and server certificate; the CA goes into the system store and
 # into the NSS database of the desktop user (Edge reads it)
@@ -61,6 +62,6 @@ RUN /opt/gp-demo/make-certs.sh /opt/gp-demo/certs \
     && install -d -o demo -g demo -m 700 /home/demo/.pki/nssdb \
     && runuser -u demo -- certutil -N -d sql:/home/demo/.pki/nssdb --empty-password \
     && runuser -u demo -- certutil -A -d sql:/home/demo/.pki/nssdb -n "Contoso Demo Root CA" -t "C,," -i /opt/gp-demo/certs/ca.crt \
-    && chmod +x /opt/gp-demo/*.sh /opt/gp-demo/session/*.sh /usr/bin/gpclient /usr/bin/gpauth /usr/local/bin/loginctl
+    && chmod +x /opt/gp-demo/*.sh /opt/gp-demo/scenarios/*.sh /opt/gp-demo/checks.py /opt/gp-demo/session/*.sh /usr/bin/gpclient /usr/bin/gpauth /usr/local/bin/loginctl
 
 ENTRYPOINT ["/opt/gp-demo/session/start.sh", "kde"]

@@ -1,12 +1,29 @@
 # NetworkManager GlobalProtect VPN Plugin
 
 NetworkManager VPN plugin for GlobalProtect (Palo Alto Networks) with SAML/SSO authentication support.
+
+![Adding and connecting a GlobalProtect VPN in GNOME Settings, sign-in in Microsoft Edge](docs/images/demo-gnome.gif)
+
+<details>
+<summary>The same on KDE Plasma</summary>
+
+![Adding and connecting a GlobalProtect VPN in KDE Plasma System Settings, sign-in in Microsoft Edge](docs/images/demo-kde.gif)
+</details>
+
+<details>
+<summary>Screenshots</summary>
+
 <img width="511" height="355" alt="image" src="https://github.com/user-attachments/assets/adb4a229-ae91-4415-8450-4b106ebeb475" />
 <img width="597" height="363" alt="image" src="https://github.com/user-attachments/assets/7613a682-068c-4992-92d7-80139969c351" />
 
 <img width="405" height="475" alt="image" src="https://github.com/user-attachments/assets/db5196a5-942e-4692-856b-e87fa647b2c7" />
 
 <img width="451" height="600" alt="image" src="https://github.com/user-attachments/assets/29c54314-33f3-4b07-9378-a8e4c462409c" />
+</details>
+
+The recordings are made by the end-to-end tests ([tests/e2e](tests/e2e/README.md)):
+the desktop, NetworkManager, the editors, the VPN service and Edge are real;
+the company "Contoso", its sign-in pages and the VPN gateway are fictional.
 
 ## Features
 
@@ -147,6 +164,13 @@ vpnc-script and were wiped on the next recalculation - see
 [#15](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/issues/15)).
 This needs the vpnc hook `/etc/vpnc/connect.d/90-gpclient-routing` that the
 package installs.
+
+By default all traffic goes through the VPN. With **Use this connection only
+for resources on its network** (IPv4 tab of the connection, `ipv4.never-default
+yes`) only the networks the gateway announces go through the tunnel, and the
+VPN DNS servers answer only for the VPN's domains:
+
+![ip route and resolvectl before connecting, with the default settings and with "Use this connection only for resources on its network"](docs/images/demo-routing-dns.gif)
 
 The password for `auth-mode=credentials` is a secret, not data:
 `nmcli connection modify "My VPN" +vpn.secrets password=...`

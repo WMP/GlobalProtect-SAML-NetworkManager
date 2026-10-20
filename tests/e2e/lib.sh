@@ -7,6 +7,7 @@
 #   window_geometry <id>                     print "X Y WIDTH HEIGHT"
 #   smooth_move <x> <y> [duration]           human-like mouse movement
 #   click <x> <y>                            move smoothly, then left click
+#   click_until_window <x> <y> <regex> [s]   click, retry when no such window opens
 #   type_slow <text> [delay-ms]              type with a human delay (default 70)
 #   key <xdotool key names...>               press keys
 #   screenshot <file>                        one frame of the screen as PNG
@@ -42,12 +43,20 @@ snapshot() {
         ip -4 addr show gpd0 2>&1
         echo "## ip route"
         ip route
+        echo "## ip route show default"
+        ip route show default
+        echo "## ip route get 9.9.9.9"
+        ip route get 9.9.9.9 2>&1
+        echo "## ip route get 10.20.0.10"
+        ip route get 10.20.0.10 2>&1
         echo "## resolvectl dns"
         resolvectl dns 2>&1
         echo "## resolvectl domain"
         resolvectl domain 2>&1
         echo "## resolvectl status gpd0"
         resolvectl status gpd0 2>&1
+        echo "## processes"
+        ps -eo user:12,pid,comm,args --no-headers | awk '$3 ~ /^(msedge|microsoft-edge.*|gpclient|gpauth)$/' | cut -c1-200
         echo "## windows"
         xdotool search --onlyvisible --name "." 2> /dev/null | while read -r w; do xdotool getwindowname "$w"; done
     } > "$DEMO_OUT/state-$1.txt" 2>&1
@@ -123,6 +132,18 @@ smooth_move() {
     done
 }
 
+# Clicks and waits for a window; clicks again (up to 3 times) when none opens,
+# because a click on a popup that is still being drawn can be lost:
+# click_until_window <x> <y> <name-regex> [seconds per try]
+click_until_window() {
+    local try
+    for try in 1 2 3; do
+        click "$1" "$2"
+        wait_for_window "$3" "${4:-8}" > /dev/null && return 0
+    done
+    return 1
+}
+
 click() {
     smooth_move "$1" "$2" "${3:-0.55}"
     sleep 0.15
@@ -150,6 +171,8 @@ animate_window() {
     done
 }
 
+EDGE_COUNT=0
+
 # The Edge sign-in of the demo (the same in both desktops). Set EDGE_DX and
 # EDGE_DY first: the offset of the page content from the window box (win_box).
 # Types the email and password, waits for the number-match page, clicks "Yes"
@@ -165,6 +188,7 @@ edge_signin() {
     win_box "$win" || fail "cannot read the Edge window geometry"
     echo "Edge window box: $WX $WY $WW $WH"
     shot step-edge-1-signin
+    snapshot "edge-open-$((++EDGE_COUNT))"
     type_slow "alex.morgan@contoso.example"
     pause 0.6
     key Return
@@ -199,5 +223,23 @@ edge_sso_auto() {
     win=$(wait_for_window "Sign in|GlobalProtect Portal" 60) || fail "the Edge sign-in window did not open"
     [ -n "${EDGE_POS:-}" ] && xdotool windowmove "$win" ${EDGE_POS}
     shot step-edge-auto
+    snapshot "edge-open-$((++EDGE_COUNT))"
     wait_window_gone "Sign in|GlobalProtect Portal" 30 || fail "the Edge window did not close by itself"
+}
+
+# Marks the end of the part that goes into the GIF; what the scenario does after
+# this (disconnecting for the checks) is cut. Writes "$DEMO_OUT/trim-end".
+mark_end() {
+    awk -v now="$(date +%s.%N)" -v start="$(cat /tmp/recording-start 2> /dev/null || echo 0)" \
+        'BEGIN { print now - start }' > "$DEMO_OUT/trim-end"
+}
+
+# Disconnects the VPN and waits until it is gone: disconnect_vpn <name>
+disconnect_vpn() {
+    nmcli connection down "$1" > /dev/null 2>&1
+    for _ in $(seq $(scaled 40)); do
+        nmcli -t -f NAME connection show --active | grep -qx "$1" || return 0
+        sleep 0.5
+    done
+    return 1
 }

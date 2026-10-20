@@ -1,0 +1,117 @@
+name: End-to-end tests
+
+# Runs the plugin on a real desktop in Docker (tests/e2e/): real GNOME or KDE,
+# NetworkManager, systemd-resolved, the editor plugins, the VPN service and
+# Microsoft Edge; only gpclient/gpauth and the sign-in site are fakes. Each
+# scenario checks the result in the container (results.json).
+#
+# Manual only: start it from the Actions tab (workflow_dispatch), or add the
+# label "e2e" to a pull request (the result then shows in the pull request's
+# checks and can be re-run there).
+#
+# The runs need a privileged container (NetworkManager, udev), which GitHub's
+# amd64 runners allow. There are no secrets; the token is read-only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "Scenario to run"
+        type: choice
+        options: [all, gnome, kde, routing, auth-cancel]
+        default: all
+      gif:
+        description: "Also make the README GIFs"
+        type: boolean
+        default: false
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+# The label is part of the group: adding another label to the pull request
+# starts a run that is skipped, and it must not cancel a running e2e run
+concurrency:
+  group: e2e-${{ github.event_name == 'pull_request' && format('{0}-{1}', github.ref, github.event.label.name) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  e2e:
+    name: ${{ matrix.scenario }}
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'e2e'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [gnome, kde, routing, auth-cancel]
+    env:
+      SCENARIO: ${{ matrix.scenario }}
+      # An empty selection (pull request label) means all scenarios
+      SELECTED: ${{ github.event.inputs.scenario || 'all' }}
+      GIF: ${{ github.event.inputs.gif || 'false' }}
+
+    steps:
+      # The image is the same for gnome, routing and auth-cancel
+      - name: Pick the image and decide whether this scenario runs
+        id: pick
+        run: |
+          case "$SCENARIO" in
+            kde) echo "image=kde" >> "$GITHUB_OUTPUT" ;;
+            *) echo "image=gnome" >> "$GITHUB_OUTPUT" ;;
+          esac
+          if [ "$SELECTED" = all ] || [ "$SELECTED" = "$SCENARIO" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipped: $SCENARIO was not selected"
+          fi
+
+      # No submodules: the images build the plugins, the Rust tools are fakes.
+      - name: Checkout code
+        if: steps.pick.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        if: steps.pick.outputs.run == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the image
+        if: steps.pick.outputs.run == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tests/e2e/Dockerfile.${{ steps.pick.outputs.image }}
+          tags: gpclient-e2e-${{ steps.pick.outputs.image }}
+          load: true
+          cache-from: type=gha,scope=e2e-${{ steps.pick.outputs.image }}
+          cache-to: type=gha,mode=max,scope=e2e-${{ steps.pick.outputs.image }}
+
+      - name: Install ffmpeg for the GIFs
+        if: steps.pick.outputs.run == 'true' && env.GIF == 'true'
+        run: command -v ffmpeg >/dev/null || { sudo apt-get update && sudo apt-get install -y ffmpeg; }
+
+      - name: Run the scenario
+        if: steps.pick.outputs.run == 'true'
+        run: |
+          args=("$SCENARIO")
+          [ "$GIF" = true ] && args+=(--gif)
+          SKIP_BUILD=1 tests/e2e/run.sh "${args[@]}"
+
+      # The results table, also when the run failed
+      - name: Job summary
+        if: always() && steps.pick.outputs.run == 'true'
+        run: python3 tests/e2e/summary.py "tests/e2e/out/$SCENARIO" "$SCENARIO" >> "$GITHUB_STEP_SUMMARY"
+
+      # Results, logs, screenshots and the recording, also when a check failed.
+      - name: Upload results
+        if: always() && steps.pick.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.scenario }}
+          path: |
+            tests/e2e/out/${{ matrix.scenario }}
+            docs/images/*.gif
+          if-no-files-found: ignore
+          retention-days: 14

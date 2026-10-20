@@ -78,5 +78,5 @@ artifacts/
 # Claude Code
 .claude/
 
-# Demo recordings
-demo/out/
+# End-to-end test output
+tests/e2e/out/

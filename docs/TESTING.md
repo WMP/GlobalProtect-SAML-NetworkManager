@@ -120,6 +120,30 @@ GUI screenshots", also after a failed run). The pure logic of the probes is in
 `.github/scripts/gui_smoke_lib.py`, tested by `tests/unit/test_gui_smoke.py`; the
 GTK and Qt parts themselves run only in CI.
 
+## End-to-end tests
+
+`tests/e2e/` runs the plugin on a real desktop in Docker: GNOME 46 (Ubuntu
+24.04) or KDE Plasma 6.6 (Ubuntu 26.04), real NetworkManager and
+systemd-resolved, the editor plugins, the VPN service and Microsoft Edge started
+by the browser wrapper. Only `gpclient`/`gpauth` (they run the real
+`vpnc-script`) and the sign-in site are fakes. The scenarios click through the
+real UI (add the VPN, connect, sign in), and a check step in the container
+fails the run when something is wrong: VPN not active, wrong tunnel address,
+Edge not started as the desktop user or not closed, wrong routes or DNS (full
+tunnel against "only for resources on its network"), errors in the service
+log, or leftovers after the disconnect. A negative scenario closes the sign-in
+window and expects a clean failure.
+
+```bash
+tests/e2e/run.sh all            # gnome, kde, routing, auth-cancel (about 25 min with the builds)
+tests/e2e/run.sh gnome --gif    # also makes docs/images/demo-gnome.gif
+```
+
+Docker with privileged containers and an amd64 host are needed. The results are
+in `tests/e2e/out/<scenario>/` (`results.json`, logs, screenshots, `raw.mp4`).
+The workflow `e2e.yml` runs the same by hand (Actions tab) or when a pull
+request gets the label `e2e`. See `tests/e2e/README.md`.
+
 ## Upstream tests
 
 `tests/upstream/` checks the pinned `external/GlobalProtect-openconnect`

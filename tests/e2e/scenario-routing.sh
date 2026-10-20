@@ -9,7 +9,17 @@ EDGE_DY=0
 EDGE_POS="545 91"
 
 say() { type_slow "# $1" 45; key Return; pause 0.4; }
-run() { type_slow "$1"; pause 0.4; key Return; pause 0.6; }
+run() { type_slow "$1" 50; pause 0.3; key Return; pause 0.4; }
+
+# The commands of the slide: default route, the way to the Internet and to a
+# company address, then the DNS servers and domains
+show_routing() {
+    run "ip route show default"
+    run "ip route get 9.9.9.9"
+    run "ip route get 10.20.0.10"
+    run "resolvectl dns"
+    run "resolvectl domain"
+}
 
 # Connect or disconnect with the VPN tile of the quick settings
 quick_vpn() {
@@ -46,11 +56,10 @@ win_box "$term" || fail "cannot read the terminal geometry"
 TX=$((WX + WW / 2)); TY=$((WY + WH / 2))
 shot step-01-terminal
 snapshot before
-say "Before connecting"
-run "ip route"
-pause 1.6
-run "resolvectl dns"
-pause 1.8
+say "Before connecting: all traffic uses the wired link"
+show_routing
+pause 2.2
+shot step-01b-before
 
 # --- 2. Connect with the default settings ----------------------------------
 quick_vpn
@@ -59,12 +68,9 @@ wait_vpn "Contoso VPN" activated 60 || fail "the VPN did not become active"
 pause 1.0
 click "$TX" "$TY" 0.6
 key ctrl+l
-say "VPN connected, default settings"
-run "ip route"
-pause 2.0
-run "resolvectl dns"
-run "resolvectl domain"
-pause 2.2
+say "Connected, default settings: Internet goes via the VPN"
+show_routing
+pause 2.6
 shot step-02-connected-default
 snapshot connected-default
 
@@ -109,11 +115,14 @@ wait_vpn "Contoso VPN" activated 60 || fail "the VPN did not become active (seco
 pause 1.0
 click "$TX" "$TY" 0.6
 key ctrl+l
-say "Routing setting enabled: only company networks use the VPN"
-run "ip route"
-pause 3.0
-run "resolvectl dns"
-run "resolvectl domain"
+say "Setting enabled: only company traffic goes via the VPN"
+show_routing
 pause 3.0
 shot step-06-connected-never-default
 snapshot connected-never-default
+mark_end
+
+# --- Disconnect for the checks (not in the GIF) -----------------------------
+disconnect_vpn "Contoso VPN" || fail "the VPN did not disconnect"
+pause 1.5
+snapshot disconnected-final

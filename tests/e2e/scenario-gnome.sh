@@ -58,7 +58,7 @@ pause 1.2
 shot step-07-vpn-added
 
 # 4. Connect with the switch of the new row; Edge opens through the wrapper
-click $((SX + 881)) $((SY + 160))
+click_until_window $((SX + 881)) $((SY + 160)) "Sign in|GlobalProtect Portal" || fail "the switch did not start the sign-in"
 edge_signin
 wait_vpn "Contoso VPN" activated 60 || fail "the VPN did not become active"
 pause 1.5
@@ -75,4 +75,7 @@ shot step-09-quick-settings
 pause 2.5
 key Escape
 pause 1.0
-snapshot end
+mark_end
+disconnect_vpn "Contoso VPN" || fail "the VPN did not disconnect"
+pause 1.5
+snapshot disconnected

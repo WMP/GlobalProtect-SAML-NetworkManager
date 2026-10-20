@@ -41,6 +41,20 @@ GPAUTH = "/usr/bin/gpauth"
 SAML_URL = "https://vpn.contoso.example/global-protect/prelogin.esp?saml=1"
 AUTH_TIMEOUT = 300
 
+
+def auth_timeout(default):
+    """Seconds to wait for the sign-in: GP_DEMO_AUTH_TIMEOUT, or the file
+    /run/gp-demo/auth-timeout (the environment does not reach us through
+    NetworkManager and sudo), or the default."""
+    value = os.environ.get("GP_DEMO_AUTH_TIMEOUT", "")
+    if not value:
+        try:
+            with open("/run/gp-demo/auth-timeout", encoding="utf-8") as handle:
+                value = handle.read().strip()
+        except OSError:
+            pass
+    return int(value) if value.isdigit() and int(value) > 0 else default
+
 TUN_NAME = "gpd0"
 VPNC_SCRIPT = "/usr/share/vpnc-scripts/vpnc-script"
 VPN_GATEWAY_IP = "198.51.100.10"  # TEST-NET-2: vpnc-script adds a host route to it
@@ -110,7 +124,7 @@ def run_gpauth(browser):
 
     remove(AUTH_DONE_FILE)
     proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True)
-    deadline = time.monotonic() + AUTH_TIMEOUT
+    deadline = time.monotonic() + auth_timeout(AUTH_TIMEOUT) + 10
     output = ""
     while True:
         if stop_requested or time.monotonic() > deadline:
@@ -120,7 +134,7 @@ def run_gpauth(browser):
             except subprocess.TimeoutExpired:
                 proc.kill()
             if not stop_requested:
-                log("ERROR", "gpauth", f"SAML authentication timed out after {AUTH_TIMEOUT}s")
+                log("ERROR", "gpauth", f"SAML authentication timed out after {auth_timeout(AUTH_TIMEOUT)}s")
             return None
         try:
             output, _ = proc.communicate(timeout=0.2)

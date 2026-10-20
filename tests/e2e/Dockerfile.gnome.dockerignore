@@ -1,10 +1,11 @@
 .git
 external
 docs
-tests
+tests/unit
+tests/upstream
 upstream
 debian
-demo/out
+tests/e2e/out
 output
 build
 *.deb

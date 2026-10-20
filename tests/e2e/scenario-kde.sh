@@ -69,7 +69,7 @@ pause 1.5
 shot step-10-tray-vpn
 smooth_move 1600 777 0.5
 pause 0.6
-click 1822 777
+click_until_window 1822 777 "Sign in|GlobalProtect Portal" || fail "the Connect button did not start the sign-in"
 edge_signin
 wait_vpn "Contoso VPN" activated 60 || fail "the VPN did not become active"
 pause 1.6
@@ -81,4 +81,7 @@ shot step-12-tray-connected
 pause 2.2
 key Escape
 pause 0.7
-snapshot end
+mark_end
+disconnect_vpn "Contoso VPN" || fail "the VPN did not disconnect"
+pause 1.5
+snapshot disconnected

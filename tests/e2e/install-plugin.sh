@@ -3,7 +3,7 @@
 # directory, with the paths of `override_dh_auto_install` in debian/rules.
 # Both demo Dockerfiles use it, so the paths are in one place.
 #
-# Usage: demo/install-plugin.sh <gnome|kde> <source-dir> <dest-root>
+# Usage: tests/e2e/install-plugin.sh <gnome|kde> <source-dir> <dest-root>
 #   gnome: libnm plugin, GTK3/GTK4 editor plugins, auth dialog, service files
 #   kde:   libnm plugin, Qt6 Plasma plugin, service files
 set -euo pipefail

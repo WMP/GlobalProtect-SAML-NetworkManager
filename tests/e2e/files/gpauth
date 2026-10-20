@@ -7,7 +7,8 @@ Starts `<path> <url>` detached (the real gpauth does the same; the path is
 /usr/libexec/gpclient/browser-wrapper, which opens Edge and closes it when this
 process exits), then waits for /run/gp-demo/auth-done, which sso-server.py
 creates when the user finishes the sign-in. Prints a fake result and exits 0;
-exits 1 after 300 s. It never touches the browser itself.
+exits 1 after 300 s (GP_DEMO_AUTH_TIMEOUT or /run/gp-demo/auth-timeout
+change that). It never touches the browser itself.
 
 The process must be called "gpauth" (comm), because the wrapper finds it with
 `pgrep -x gpauth`: a script with this file name has that comm.
@@ -20,6 +21,20 @@ import time
 
 AUTH_DONE_FILE = "/run/gp-demo/auth-done"
 TIMEOUT = 300
+
+
+def auth_timeout(default):
+    """Seconds to wait for the sign-in: GP_DEMO_AUTH_TIMEOUT, or the file
+    /run/gp-demo/auth-timeout (the environment does not reach us through
+    NetworkManager and sudo), or the default."""
+    value = os.environ.get("GP_DEMO_AUTH_TIMEOUT", "")
+    if not value:
+        try:
+            with open("/run/gp-demo/auth-timeout", encoding="utf-8") as handle:
+                value = handle.read().strip()
+        except OSError:
+            pass
+    return int(value) if value.isdigit() and int(value) > 0 else default
 
 
 def main():
@@ -41,7 +56,7 @@ def main():
         print(f"Failed to launch the browser: {error}", file=sys.stderr)
         return 1
 
-    deadline = time.monotonic() + TIMEOUT
+    deadline = time.monotonic() + auth_timeout(TIMEOUT)
     while time.monotonic() < deadline:
         if os.path.exists(AUTH_DONE_FILE):
             print(

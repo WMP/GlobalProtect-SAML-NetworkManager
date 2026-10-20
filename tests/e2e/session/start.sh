@@ -1,11 +1,17 @@
 #!/bin/bash
-# Container entrypoint of the README demo (runs as root).
+# Container entrypoint of the end-to-end tests (runs as root).
 # Usage: start.sh <gnome|kde>
 #
-# Starts udev, the system D-Bus, NetworkManager with a wired connection, the
-# fictional sign-in site and an X11 desktop session, then records the screen
-# while the scenario runs (/opt/gp-demo/scenario.sh, or a file bind-mounted
-# over it). Output goes to /out: raw.mp4, logs, screenshots of the scenario.
+# Starts udev, the system D-Bus, systemd-resolved, NetworkManager with a wired
+# connection to a "home router" (a network namespace), the fictional sign-in
+# site and an X11 desktop session, then records the screen while the scenario
+# runs and checks the result.
+#
+# Environment: E2E_SCENARIO (name of /opt/gp-demo/scenarios/scenario-<name>.sh,
+# default: the desktop), E2E_SCENARIO_FILE (a file to run instead),
+# GP_DEMO_AUTH_TIMEOUT (seconds the fake gpauth waits for the sign-in).
+# Output goes to /out: raw.mp4, logs, screenshots, state-*.txt, results.json.
+# The exit code is not zero if the scenario or a check fails.
 set -u
 
 DE="${1:?usage: $0 <gnome|kde>}"
@@ -13,6 +19,7 @@ OUT=/out
 DEMO_UID=1000
 mkdir -p "$OUT" /run/gp-demo
 chmod a+rwx "$OUT"
+[ -n "${GP_DEMO_AUTH_TIMEOUT:-}" ] && echo "$GP_DEMO_AUTH_TIMEOUT" > /run/gp-demo/auth-timeout
 LOG="$OUT/start.log"
 log() { echo "$(date +%T) $*" | tee -a "$LOG"; }
 
@@ -52,6 +59,17 @@ nmcli connection add type ethernet ifname enp0s31f6 con-name "Wired connection 1
     ipv4.method manual ipv4.addresses 192.168.1.20/24 ipv4.gateway 192.168.1.1 ipv4.dns 192.168.1.1 \
     ipv6.method disabled > /dev/null
 nmcli connection up "Wired connection 1" > /dev/null
+# The other end of the cable is the home router, in its own network namespace
+# (NetworkManager keeps managing the card after the peer has moved)
+ip netns add router
+ip link set ethpeer netns router
+ip -n router addr add 192.168.1.1/24 dev ethpeer
+ip -n router link set ethpeer up
+ip -n router link set lo up
+for _ in $(seq 40); do
+    nmcli -t -f NAME,STATE connection show --active | grep -qx "Wired connection 1:activated" && break
+    sleep 0.5
+done
 
 log "sign-in site"
 python3 /opt/gp-demo/sso-server.py --cert /opt/gp-demo/certs/server.crt \
@@ -77,7 +95,8 @@ fi
 sleep 25
 log "desktop ready"
 
-SCENARIO=/opt/gp-demo/scenario.sh
+SCENARIO="${E2E_SCENARIO_FILE:-/opt/gp-demo/scenarios/scenario-${E2E_SCENARIO:-$DE}.sh}"
+log "scenario: $SCENARIO"
 if [ "$DE" = gnome ]; then
     # Close the "Screen Lock disabled" banner gnome-shell shows (no GDM here)
     as_demo xdotool mousemove 1216 57 click 1
@@ -92,6 +111,7 @@ date +%s.%N > /tmp/recording-start
 log "scenario start"
 as_demo env DEMO_OUT="$OUT" DEMO_DE="$DE" bash "$SCENARIO" > "$OUT/scenario.log" 2>&1
 STATUS=$?
+echo "$STATUS" > "$OUT/scenario.exit"
 log "scenario end (exit $STATUS)"
 sleep 1
 pkill -INT -u $DEMO_UID -x ffmpeg
@@ -103,6 +123,12 @@ cp /tmp/edge-wrapper-$DEMO_UID.log "$OUT/edge-wrapper.log" 2>/dev/null || true
 nmcli -t -f NAME,TYPE,STATE connection show --active > "$OUT/nmcli-active.txt" 2>&1
 { ip route; resolvectl status; } > "$OUT/network-state.txt" 2>&1
 ip -4 addr show gpd0 > "$OUT/gpd0.txt" 2>&1
+
+# The checks read what the scenario saved (state-*.txt) and the logs
+log "checks"
+python3 /opt/gp-demo/checks.py "${E2E_SCENARIO:-$DE}" "$OUT" 2>&1 | tee "$OUT/checks.log"
+CHECKS=${PIPESTATUS[0]}
 chmod -R a+rwX "$OUT" 2>/dev/null || true
-log "done"
-exit "$STATUS"
+log "done (scenario exit $STATUS, checks exit $CHECKS)"
+[ "$STATUS" -ne 0 ] && exit "$STATUS"
+exit "$CHECKS"
