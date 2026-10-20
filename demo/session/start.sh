@@ -74,10 +74,15 @@ if [ "$DE" = kde ]; then
     # The panel is a window of plasmashell
     for _ in $(seq 120); do [ -n "$(as_demo xdotool search --class plasmashell 2>/dev/null)" ] && break; sleep 0.5; done
 fi
-sleep 15
+sleep 25
 log "desktop ready"
 
 SCENARIO=/opt/gp-demo/scenario.sh
+if [ "$DE" = gnome ]; then
+    # Close the "Screen Lock disabled" banner gnome-shell shows (no GDM here)
+    as_demo xdotool mousemove 1216 57 click 1
+    sleep 1
+fi
 as_demo bash -c "xdotool mousemove 960 540"
 as_demo ffmpeg -nostdin -y -f x11grab -framerate 25 -video_size 1920x1080 -i :1 \
     -c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p /tmp/raw.mp4 > "$OUT/ffmpeg.log" 2>&1 &

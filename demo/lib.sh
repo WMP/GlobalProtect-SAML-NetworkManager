@@ -7,7 +7,7 @@
 #   window_geometry <id>                     print "X Y WIDTH HEIGHT"
 #   smooth_move <x> <y> [duration]           human-like mouse movement
 #   click <x> <y>                            move smoothly, then left click
-#   type_slow <text>                         type with a human delay
+#   type_slow <text> [delay-ms]              type with a human delay (default 70)
 #   key <xdotool key names...>               press keys
 #   screenshot <file>                        one frame of the screen as PNG
 #   pause <seconds>
@@ -46,6 +46,8 @@ snapshot() {
         resolvectl dns 2>&1
         echo "## resolvectl domain"
         resolvectl domain 2>&1
+        echo "## resolvectl status gpd0"
+        resolvectl status gpd0 2>&1
         echo "## windows"
         xdotool search --onlyvisible --name "." 2> /dev/null | while read -r w; do xdotool getwindowname "$w"; done
     } > "$DEMO_OUT/state-$1.txt" 2>&1
@@ -127,7 +129,7 @@ click() {
     xdotool click 1
 }
 
-type_slow() { xdotool type --delay 70 -- "$1"; }
+type_slow() { xdotool type --delay "${2:-70}" -- "$1"; }
 
 key() { xdotool key --delay 80 "$@"; }
 
@@ -154,26 +156,28 @@ animate_window() {
 # on "Stay signed in?" and waits until the browser closes itself.
 edge_signin() {
     local win
-    win=$(wait_for_window "Sign in" 60) || fail "the Edge sign-in window did not open"
-    # Edge places its own window; put it in the middle of the desktop
+    # The window opens on the portal page ("GlobalProtect Portal"); Edge places
+    # it where it likes, so move it to the middle of the desktop right away
+    win=$(wait_for_window "Sign in|GlobalProtect Portal" 60) || fail "the Edge sign-in window did not open"
     [ -n "${EDGE_POS:-}" ] && xdotool windowmove "$win" ${EDGE_POS}
-    pause 1.2
+    wait_for_window "Sign in" 30 > /dev/null || fail "the sign-in page did not load"
+    pause 1.0
     win_box "$win" || fail "cannot read the Edge window geometry"
     echo "Edge window box: $WX $WY $WW $WH"
     shot step-edge-1-signin
     type_slow "alex.morgan@contoso.example"
     pause 0.6
     key Return
-    pause 1.2
+    pause 0.8
     shot step-edge-2-password
     type_slow "correct-horse-battery"
     pause 0.6
     key Return
-    pause 1.2
+    pause 0.8
     shot step-edge-3-approve
     # The approve page moves on by itself after 4.5 s
     pause 4.5
-    pause 1.0
+    pause 0.8
     shot step-edge-4-stay
     click $((WX + EDGE_DX + 569)) $((WY + EDGE_DY + 460)) 0.6
     pause 1.0
@@ -192,7 +196,7 @@ mark_start() {
 # finishes by itself. Waits until the window is gone.
 edge_sso_auto() {
     local win
-    win=$(wait_for_window "Sign in" 60) || fail "the Edge sign-in window did not open"
+    win=$(wait_for_window "Sign in|GlobalProtect Portal" 60) || fail "the Edge sign-in window did not open"
     [ -n "${EDGE_POS:-}" ] && xdotool windowmove "$win" ${EDGE_POS}
     shot step-edge-auto
     wait_window_gone "Sign in|GlobalProtect Portal" 30 || fail "the Edge window did not close by itself"

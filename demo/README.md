@@ -5,11 +5,15 @@ This directory builds the GIFs of the README (`docs/images/demo-gnome.gif`,
 real desktop and a screen recorder.
 
 Everything on the screen is real: the desktop (GNOME 46 on Ubuntu 24.04 or
-KDE Plasma 6.6 on Ubuntu 26.04, both on X11), NetworkManager, the connection
-editor plugins and the VPN service built from this repository, the browser
-wrapper and Microsoft Edge. Only these parts are fake:
+KDE Plasma 6.6 on Ubuntu 26.04, both on X11), NetworkManager, systemd-resolved,
+the connection editor plugins and the VPN service built from this repository,
+the vpnc hook of the plugin, the browser wrapper and Microsoft Edge. Only these
+parts are fake:
 
 - `demo/files/gpclient` and `demo/files/gpauth` replace the upstream tools.
+  The fake `gpclient` creates the tunnel device and runs the real
+  `/usr/share/vpnc-scripts/vpnc-script` like openconnect does, so routes and
+  DNS come from the real stack.
 - The sign-in pages of "Contoso" are a local HTTPS site
   (`demo/files/sso-server.py`, `demo/files/www/`). A demo CA, made at build
   time, is trusted in the system store and in the NSS database of the user.
@@ -27,8 +31,12 @@ NetworkManager would change the network of the host.
 ## Run
 
 ```bash
-demo/record.sh gnome     # or: kde, all
+demo/record.sh gnome     # or: kde, routing, all (all = gnome and kde)
 ```
+
+`routing` records the console slide (`docs/images/demo-routing-dns.gif`) on the
+GNOME image: `ip route` and `resolvectl` before connecting, after connecting
+and with "Use this connection only for resources on its network".
 
 The script builds the image, runs the scenario and writes the GIF. In
 `demo/out/<de>/` you get `raw.mp4`, screenshots of the scenario and the logs
@@ -53,7 +61,12 @@ Environment variables of `record.sh`:
 They source `demo/lib.sh` (`wait_for_window`, `smooth_move`, `click`,
 `type_slow`, `key`, `window_geometry`, `screenshot`, `pause`). Recording starts
 just before the scenario and stops when it ends. Write screenshots to
-`$DEMO_OUT`.
+`$DEMO_OUT`. A scenario fails loudly: every wait ends with `|| fail "..."`,
+the exit code is not zero, the reason is in `scenario.log`, `failure.png` shows
+the screen, and `record.sh` stops without touching the GIF. `snapshot <name>`
+saves connections, addresses, routes and DNS to `state-<name>.txt`.
+`DEMO_TIMEOUT_SCALE` multiplies all timeouts. A scenario can call `mark_start`:
+what happened before is cut from the GIF (used for set-up).
 
 To work on a scenario without rebuilding the image:
 
@@ -70,5 +83,10 @@ Then look at `demo/out/gnome/shot-*.png` to find the coordinates for clicks.
 - GNOME starts without `gnome-session` (it needs logind): `session/desktop.sh`
   starts `gnome-shell --x11` by hand. NetworkManager runs without polkit
   (`auth-polkit=false`).
+- The sign-in page remembers the account in `localStorage` after the password
+  step, so the second sign-in is the short one (account tile, no typing).
+- Neither the GNOME Network panel nor the KDE tray icon treats the virtual
+  (veth) wired device as real hardware: GNOME hides the "Wired" section and the
+  Plasma icon always looks disconnected, although NetworkManager is connected.
 - KDE uses Ubuntu 26.04: Plasma 6.8 (KDE neon) has no X11 session, and the
   Wayland KWin needs a GPU.

@@ -55,6 +55,7 @@ make_gif() {
         -loop 0 "$tmpgif"
     rm -f "$pal"
     mv -f "$tmpgif" "$gif"
+    chmod 644 "$gif"
     local size
     size=$(stat -c %s "$gif")
     echo "GIF: $gif ($((size / 1024)) KiB)"

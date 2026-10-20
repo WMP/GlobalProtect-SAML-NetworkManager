@@ -8,7 +8,7 @@ EDGE_DX=0
 EDGE_DY=0
 EDGE_POS="545 91"
 
-say() { type_slow "# $1"; key Return; pause 0.5; }
+say() { type_slow "# $1" 45; key Return; pause 0.4; }
 run() { type_slow "$1"; pause 0.4; key Return; pause 0.6; }
 
 # Connect or disconnect with the VPN tile of the quick settings
@@ -38,7 +38,7 @@ xdotool mousemove 1100 600
 mark_start
 
 # --- 1. Before connecting ---------------------------------------------------
-pause 1.5
+pause 1.0
 click 33 260
 term=$(wait_for_window "^demo@" 20) || fail "the terminal did not open"
 pause 1.2
@@ -48,9 +48,9 @@ shot step-01-terminal
 snapshot before
 say "Before connecting"
 run "ip route"
-pause 2.5
+pause 1.6
 run "resolvectl dns"
-pause 3.0
+pause 1.8
 
 # --- 2. Connect with the default settings ----------------------------------
 quick_vpn
@@ -61,10 +61,10 @@ click "$TX" "$TY" 0.6
 key ctrl+l
 say "VPN connected, default settings"
 run "ip route"
-pause 3.0
+pause 2.0
 run "resolvectl dns"
 run "resolvectl domain"
-pause 3.0
+pause 2.2
 shot step-02-connected-default
 snapshot connected-default
 
@@ -74,13 +74,13 @@ for _ in $(seq 40); do
     nmcli -t -f NAME connection show --active | grep -qx "Contoso VPN" || break
     sleep 0.5
 done
-pause 1.5
+pause 1.0
 snapshot disconnected
 key Escape
 pause 0.8
 click 33 196
 win=$(wait_for_window "^Settings$" 20) || fail "Settings did not open"
-pause 1.5
+pause 1.0
 win_box "$win" || fail "cannot read the Settings geometry"
 SX=$((WX + 61)); SY=$((WY + 55))
 shot step-03-settings
@@ -90,10 +90,10 @@ pause 1.0
 win_box "$dlg" || fail "cannot read the dialog geometry"
 DX=$((WX + 61)); DY=$((WY + 55))
 click $((DX + 197)) $((DY + 64))
-pause 1.2
+pause 0.8
 shot step-04-ipv4
 click $((DX + 37)) $((DY + 456))
-pause 1.8
+pause 1.5
 shot step-05-checkbox
 click $((DX + 711)) $((DY + 23))
 wait_window_gone "^Contoso VPN$" 20 || fail "the VPN dialog did not close"
@@ -114,6 +114,6 @@ run "ip route"
 pause 3.0
 run "resolvectl dns"
 run "resolvectl domain"
-pause 3.5
+pause 3.0
 shot step-06-connected-never-default
 snapshot connected-never-default
