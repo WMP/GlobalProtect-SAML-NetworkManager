@@ -19,6 +19,10 @@ gnome)
         gsettings set org.gnome.desktop.screensaver lock-enabled false
         gsettings set org.gnome.desktop.session idle-delay 0
         gsettings set org.gnome.shell welcome-dialog-last-shown-version "999"
+        gsettings set org.gnome.mutter center-new-windows true
+        gsettings set org.gnome.Settings last-panel network
+        gsettings set org.gnome.Settings window-state "(1080, 760, false)"
+        gsettings set org.gnome.Settings show-development-warning false
         gsettings set org.gnome.shell favorite-apps \
             "[\"microsoft-edge.desktop\", \"org.gnome.Nautilus.desktop\", \"org.gnome.Settings.desktop\", \"org.gnome.Terminal.desktop\"]"
         /usr/libexec/gsd-xsettings &
@@ -26,7 +30,22 @@ gnome)
     ;;
 kde)
     export XDG_CURRENT_DESKTOP=KDE KDE_FULL_SESSION=true XDG_SESSION_DESKTOP=KDE
-    exec dbus-run-session startplasma-x11
+    # New windows are centered; the task manager pins only apps that exist
+    kwriteconfig6 --file kwinrc --group Windows --key Placement Centered
+    exec dbus-run-session -- bash -c '
+        (
+            script="for (const p of panels()) { for (const id of p.widgetIds) { const w = p.widgetById(id);
+                if (w.type == \"org.kde.plasma.icontasks\") { w.currentConfigGroup = [\"General\"];
+                w.writeConfig(\"launchers\", [\"applications:org.kde.dolphin.desktop\",
+                \"applications:systemsettings.desktop\", \"applications:microsoft-edge.desktop\"]); } } }"
+            # evaluateScript returns nothing, and the panel appears late: repeat
+            for _ in $(seq 25); do
+                dbus-send --session --dest=org.kde.plasmashell /PlasmaShell \
+                    org.kde.PlasmaShell.evaluateScript "string:$script" > /dev/null 2>&1
+                sleep 2
+            done
+        ) &
+        exec startplasma-x11'
     ;;
 *)
     echo "usage: $0 <gnome|kde>" >&2

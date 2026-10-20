@@ -1,33 +1,68 @@
 #!/bin/bash
-# Placeholder scenario (KDE): proves the whole chain. The real click-by-click
-# scenario replaces this file. Runs as user demo inside the container.
+# README scenario (KDE Plasma): add the VPN in System Settings, connect from
+# the system tray. Runs as user demo inside the container; see demo/lib.sh.
 source /opt/gp-demo/lib.sh
+EDGE_DX=${EDGE_DX:-0}
+EDGE_DY=${EDGE_DY:-0}
+EDGE_POS="480 20"
 
-pause 3
-screenshot "$DEMO_OUT/shot-1-desktop.png"
+pause 1.5
+shot step-01-desktop
 
-nmcli connection add type vpn vpn-type gpclient con-name "Contoso VPN" \
-    vpn.data "gateway=vpn.contoso.example,browser=edge" > /dev/null
-nmcli connection up "Contoso VPN" > "$DEMO_OUT/nmcli-up.log" 2>&1 &
+# 1. Network icon in the tray, then the configure button of the popup
+click 1742 1048
+pause 1.2
+shot step-02-tray-popup
+click 1857 597
+win=$(wait_for_window "Wi-Fi & Networking" 30) || fail "System Settings did not open"
+pause 1.5
+shot step-03-settings
 
-win=$(wait_for_window "Sign in" 60) || { echo "no Edge window"; exit 1; }
-echo "Edge window $win: $(window_geometry "$win")"
-pause 3
-screenshot "$DEMO_OUT/shot-2-signin.png"
+# 2. "+" below the connection list, then the GlobalProtect entry
+win_box "$win" || fail "cannot read the System Settings geometry"
+BX=$WX; BY=$WY
+click 974 763
+dlg=$(wait_for_window "Choose a Connection Type" 20) || fail "the connection type dialog did not open"
+pause 1.0
+shot step-04-types
+smooth_move 950 600 0.5
+for _ in 1 2 3 4 5 6 7 8 9 10; do xdotool click 5; sleep 0.12; done
+pause 1.0
+shot step-05-types-scrolled
+click 790 432
+dlg=$(wait_for_window "^New Connection" 20) || fail "the connection editor did not open"
+pause 1.0
+win_box "$dlg" || fail "cannot read the editor geometry"
+EX=$WX; EY=$WY
+shot step-06-editor
 
-type_slow "alex.morgan@contoso.example"
-key Return
-pause 2
-type_slow "demo-password"
-key Return
-pause 6
-screenshot "$DEMO_OUT/shot-3-stay-signed-in.png"
-key Return
+# 3. Our tab: name, address, browser
+click $((EX + 142)) $((EY + 63))
+pause 0.8
+click $((EX + 316)) $((EY + 26))
+key ctrl+a
+type_slow "Contoso VPN"
+pause 0.8
+click $((EX + 341)) $((EY + 102))
+type_slow "vpn.contoso.example"
+pause 0.8
+click $((EX + 238)) $((EY + 282))
+pause 1.0
+shot step-07-browser-list
+smooth_move $((EX + 238)) $((EY + 282 + 62)) 0.5
+pause 0.7
+click $((EX + 238)) $((EY + 282 + 30))
+pause 1.8
+shot step-08-filled
+click $((EX + 381)) $((EY + 609))
+wait_window_gone "^New Connection" 20 || fail "the connection editor did not close"
+pause 1.2
+shot step-09-saved
 
-for _ in $(seq 60); do
-    nmcli -t -f NAME,STATE connection show --active | grep -q "^Contoso VPN:activated" && break
-    sleep 1
-done
-pause 3
-screenshot "$DEMO_OUT/shot-4-connected.png"
-nmcli -t -f NAME,TYPE,STATE connection show --active
+# 4. Close System Settings, connect from the tray popup
+click $((BX + 916)) $((BY - 14))
+wait_window_gone "Wi-Fi & Networking" 10 || fail "System Settings did not close"
+pause 1.0
+click 1742 1048
+pause 1.5
+shot step-10-tray-vpn
