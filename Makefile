@@ -6,7 +6,7 @@ GPOC_DIR = external/GlobalProtect-openconnect
 RUSTUP_HOME ?= $(HOME)/.rustup
 CARGO_HOME ?= $(HOME)/.cargo
 CARGO = $(CARGO_HOME)/bin/cargo
-RUST_VERSION = 1.85
+RUST_VERSION = 1.89
 
 # Main targets
 all: gnome-plugins gpclient gpauth
@@ -30,9 +30,17 @@ setup-rust:
 		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain $(RUST_VERSION); \
 	fi
 
+# A real checkout: sync the URLs and update the nested submodules to the pinned
+# commits (a no-op when they are right), so a bump of the pin that moves a
+# nested submodule does not leave the old sources. Sources copied into the
+# build container have no usable git (.dockerignore drops the root .git): keep
+# them when the nested sources are there.
 .PHONY: init-submodules
 init-submodules:
-	@if [ ! -f $(GPOC_DIR)/crates/openconnect/deps/openconnect/.git ]; then \
+	@if [ -e $(GPOC_DIR)/.git ] && git -C $(GPOC_DIR) rev-parse --git-dir >/dev/null 2>&1; then \
+		echo "Updating GlobalProtect-openconnect submodules..."; \
+		cd $(GPOC_DIR) && git submodule sync --recursive && git submodule update --init --recursive; \
+	elif [ ! -f $(GPOC_DIR)/crates/openconnect/deps/openconnect/.git ]; then \
 		echo "Initializing GlobalProtect-openconnect submodules..."; \
 		cd $(GPOC_DIR) && git submodule update --init --recursive; \
 	fi
@@ -191,6 +199,11 @@ test-ui: install-dev restart-nm $(ARTIFACTS_DIR)
 .PHONY: test-unit
 test-unit:
 	python3 -m pytest tests/unit -v
+
+# Run the upstream contract tests (see docs/UPSTREAM.md)
+.PHONY: test-upstream
+test-upstream:
+	python3 -m pytest tests/upstream -q
 
 # Run GUI tests without rebuilding (assumes plugin already installed)
 test-ui-only: $(ARTIFACTS_DIR)

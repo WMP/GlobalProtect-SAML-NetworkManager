@@ -40,8 +40,10 @@ ifneq ($(HAS_CORE),)
 	# Ensure GlobalProtect-openconnect nested submodules (openconnect + libxml2)
 	# are checked out. The openconnect crate build.rs needs their C sources to
 	# build and patch the static library; without a recursive checkout the
-	# cargo build below fails. This is a no-op when the sources are already
-	# present (e.g. copied into the build container).
+	# cargo build below fails. In a git checkout the target syncs and updates
+	# the nested submodules to the pinned commits (a no-op when they are right);
+	# it does nothing when the sources were copied into the build container
+	# (no usable git there) and are already present.
 	$(MAKE) init-submodules
 
 	# Build GNOME plugins only (Rust binaries are built separately below)

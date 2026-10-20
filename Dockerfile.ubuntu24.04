@@ -44,9 +44,9 @@ RUN useradd -m -s /bin/bash builder && \
 # Switch to builder user to install Rust
 USER builder
 
-# Install Rust via rustup as builder user (we need Rust 1.85+ for GlobalProtect-openconnect v2.5.1)
+# Install Rust via rustup as builder user (the version comes from rust-toolchain.toml of GlobalProtect-openconnect)
 # This layer will be cached as long as Rust version doesn't change
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.85
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.89
 ENV PATH="/home/builder/.cargo/bin:${PATH}"
 
 # Switch back to root to set working directory

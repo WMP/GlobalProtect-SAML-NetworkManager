@@ -22,7 +22,10 @@ and `arm64`, and published as a signed apt repository on GitHub Pages.
 | `.github/workflows/` | `tests.yml` (unit tests), `build-release.yml` (matrix Ubuntu × arch), `publish-apt.yml` |
 | `.github/scripts/build-apt-repo.sh` | Builds the apt repository from release `.deb` files |
 | `external/GlobalProtect-openconnect` | Git submodule (upstream `gpclient`/`gpauth`) |
+| `upstream/` | Contract with upstream: `contract.json`, `features.json`, `interfaces.json`, `verification.json` |
+| `scripts/upstream_contract.py` | `check`, `update`, `features`, `interfaces`, `gate` for `upstream/` |
 | `tests/unit/` | Unit tests (pytest), run anywhere |
+| `tests/upstream/` | Tests of the pinned submodule (need `external/`) |
 | `tests/test_*.py` | GUI tests (dogtail, needs an X11 session): see `CLAUDE_INSTRUCTIONS.md` |
 
 ## Ground rules
@@ -32,6 +35,15 @@ and `arm64`, and published as a signed apt repository on GitHub Pages.
 - Never hard-code `x86_64-linux-gnu`. Use `$(DEB_HOST_MULTIARCH)` in
   `debian/rules` (from `/usr/share/dpkg/architecture.mk`), `$(MULTIARCH)` in the
   Makefiles, and `CMAKE_LIBRARY_ARCHITECTURE` in CMake.
+- Upstream (`external/`) is pinned to the release tag named in `README.md`, never
+  to upstream `main` (main's legacy untagged pin is the only exception, see
+  `docs/UPSTREAM.md`). Bump it as in `docs/UPSTREAM.md` and run
+  `python3 -m pytest tests/upstream -q`. AI agents never add a record to
+  `upstream/verification.json` and never add the label `upstream-verified`:
+  only a person who installed and ran the package does. The step-by-step
+  playbook for agents is `docs/UPSTREAM_AGENTS.md`. Every function that reads
+  upstream output or runs upstream tools is listed in `upstream/interfaces.json`
+  with at least two tests (`scripts/upstream_contract.py interfaces` enforces it).
 - `scripts/browser-wrapper.sh` identifies the real user by **UID only**. Never
   pass a user name taken from the environment into a command, and never start
   the browser as root.

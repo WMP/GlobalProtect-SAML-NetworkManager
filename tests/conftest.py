@@ -17,14 +17,15 @@ from helpers.screenshot import take_screenshot_on_failure
 
 
 def _only_unit_tests(config):
-    """True when the run targets only tests/unit (no GUI environment needed)."""
-    unit_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "unit"))
+    """True when the run targets only tests/unit or tests/upstream (no GUI environment needed)."""
+    here = os.path.dirname(__file__)
+    unit_dirs = [os.path.abspath(os.path.join(here, name)) for name in ("unit", "upstream")]
     args = config.args or []
     if not args:
         return False
     for arg in args:
         path = os.path.abspath(str(arg).split("::")[0])
-        if not (path == unit_dir or path.startswith(unit_dir + os.sep)):
+        if not any(path == d or path.startswith(d + os.sep) for d in unit_dirs):
             return False
     return True
 

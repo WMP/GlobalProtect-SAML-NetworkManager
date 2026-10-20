@@ -113,6 +113,14 @@ GUI screenshots", also after a failed run). The pure logic of the probes is in
 `.github/scripts/gui_smoke_lib.py`, tested by `tests/unit/test_gui_smoke.py`; the
 GTK and Qt parts themselves run only in CI.
 
+## Upstream tests
+
+`tests/upstream/` checks the pinned `external/GlobalProtect-openconnect`
+(the contract, the changelog classification, the README tag and the Rust
+version). Run `python3 -m pytest tests/upstream -q` with the submodule checked
+out. A breaking upstream change needs a manual verification: see
+[UPSTREAM.md](UPSTREAM.md).
+
 ## Troubleshooting
 
 ### Common errors

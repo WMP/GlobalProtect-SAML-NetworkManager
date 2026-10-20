@@ -1,0 +1,356 @@
+{
+  "tag": null,
+  "legacy_untagged": true,
+  "commit": "9e4f45997ebee452c58d7d3066dcfc175d65ef82",
+  "version": "2.6.5",
+  "items": [
+    {
+      "id": "gateway-count",
+      "kind": "anchor",
+      "path": "crates/gpapi/src/portal/config.rs",
+      "text": "Found {} gateways in portal config",
+      "used_by": "service/nm-gpclient-service.py: GATEWAY_COUNT_RE"
+    },
+    {
+      "id": "gateway-chosen-selected",
+      "kind": "anchor",
+      "path": "apps/gpclient/src/connect/mod.rs",
+      "text": "Connecting to the selected gateway: {}",
+      "used_by": "service/nm-gpclient-service.py: GATEWAY_CHOSEN_RE"
+    },
+    {
+      "id": "gateway-chosen-only",
+      "kind": "anchor",
+      "path": "apps/gpclient/src/connect/mod.rs",
+      "text": "Connecting to the only available gateway: {}",
+      "used_by": "service/nm-gpclient-service.py: GATEWAY_CHOSEN_RE"
+    },
+    {
+      "id": "gateway-select-prompt",
+      "kind": "anchor",
+      "path": "apps/gpclient/src/connect/mod.rs",
+      "text": "Which gateway do you want to connect to?",
+      "used_by": "service/nm-gpclient-service.py: gateway selection detection (Select prompt text)"
+    },
+    {
+      "id": "passphrase-prompt",
+      "kind": "anchor",
+      "path": "apps/gpclient/src/connect/mod.rs",
+      "text": "Enter the {} passphrase:",
+      "used_by": "service/nm-gpclient-service.py: passphrase prompt detection (one-time secret prompts)"
+    },
+    {
+      "id": "login-default-message",
+      "kind": "anchor",
+      "path": "crates/gpapi/src/portal/prelogin.rs",
+      "text": "Please enter the login credentials",
+      "used_by": "service/nm-gpclient-service.py: AUTH_BANNER_RE (default banner)"
+    },
+    {
+      "id": "login-default-username",
+      "kind": "anchor",
+      "path": "crates/gpapi/src/portal/prelogin.rs",
+      "text": "String::from(\"Username\")",
+      "used_by": "service/nm-gpclient-service.py: LABEL_HINT_RE, LABEL_WORD_RE, LABEL_SUB_WORD_RE (credentials prompt label)"
+    },
+    {
+      "id": "login-default-password",
+      "kind": "anchor",
+      "path": "crates/gpapi/src/portal/prelogin.rs",
+      "text": "String::from(\"Password\")",
+      "used_by": "service/nm-gpclient-service.py: LABEL_HINT_RE, LABEL_WORD_RE, LABEL_SUB_WORD_RE (credentials prompt label)"
+    },
+    {
+      "id": "auth-banner",
+      "kind": "anchor",
+      "path": "apps/gpclient/src/connect/credential.rs",
+      "text": "println!(\"{} ({}: {})\", prelogin.auth_message(), prefix, server);",
+      "used_by": "service/nm-gpclient-service.py: AUTH_BANNER_RE"
+    },
+    {
+      "id": "mfa-prompt",
+      "kind": "anchor",
+      "path": "apps/gpclient/src/connect/gateway.rs",
+      "text": "Text::new(&message)",
+      "used_by": "service/nm-gpclient-service.py: ONE_TIME_SECRET_RE, BARE_CODE_RE (OTP prompt detection, MFA challenge text)"
+    },
+    {
+      "id": "as-gateway-note",
+      "kind": "anchor",
+      "path": "apps/gpclient/src/connect/mod.rs",
+      "text": "NOTE: try to use the `--as-gateway` option if you were authenticated twice.",
+      "used_by": "service/nm-gpclient-service.py: handling of the --as-gateway note"
+    },
+    {
+      "id": "fix-openssl-hint",
+      "kind": "anchor",
+      "path": "crates/gpapi/src/clap/mod.rs",
+      "text": "Re-run it with the `--fix-openssl` option",
+      "used_by": "service/nm-gpclient-service.py: OPENSSL_LEGACY_ERROR_RE"
+    },
+    {
+      "id": "legacy-openssl-detect",
+      "kind": "anchor",
+      "path": "crates/gpapi/src/error.rs",
+      "text": "contains(\"unsafe legacy renegotiation\")",
+      "used_by": "service/nm-gpclient-service.py: OPENSSL_LEGACY_ERROR_RE"
+    },
+    {
+      "id": "lock-file",
+      "kind": "anchor",
+      "path": "apps/gpclient/src/main.rs",
+      "text": "/var/run/gpclient.lock",
+      "used_by": "service/nm-gpclient-service.py: _cleanup_stale_gpd0 (gpclient keeps one session by its lock file)"
+    },
+    {
+      "id": "sudo-uid",
+      "kind": "anchor",
+      "path": "crates/gpapi/src/process/users.rs",
+      "text": "SUDO_UID",
+      "used_by": "service/nm-gpclient-service.py: SUDO_UID in the gpclient environment"
+    },
+    {
+      "id": "cli-fix-openssl",
+      "kind": "anchor",
+      "path": "apps/gpclient/src/cli.rs",
+      "text": "  fix_openssl: bool,",
+      "used_by": "service/nm-gpclient-service.py: --fix-openssl"
+    },
+    {
+      "id": "cli-disconnect-subcommand",
+      "kind": "anchor",
+      "path": "apps/gpclient/src/cli.rs",
+      "text": "Disconnect(DisconnectArgs),",
+      "used_by": "service/nm-gpclient-service.py: gpclient disconnect"
+    },
+    {
+      "id": "cli-as-gateway",
+      "kind": "anchor",
+      "path": "apps/gpclient/src/connect/args.rs",
+      "text": "pub(super) as_gateway: bool,",
+      "used_by": "service/nm-gpclient-service.py: --as-gateway"
+    },
+    {
+      "id": "cli-user",
+      "kind": "anchor",
+      "path": "apps/gpclient/src/connect/args.rs",
+      "text": "pub(super) user: Option<String>,",
+      "used_by": "service/nm-gpclient-service.py: --user"
+    },
+    {
+      "id": "cli-browser",
+      "kind": "anchor",
+      "path": "apps/gpclient/src/connect/args.rs",
+      "text": "pub(super) browser: Option<String>,",
+      "used_by": "service/nm-gpclient-service.py: --browser"
+    },
+    {
+      "id": "cli-hip",
+      "kind": "anchor",
+      "path": "apps/gpclient/src/connect/args.rs",
+      "text": "pub(super) hip: Option<String>,",
+      "used_by": "service/nm-gpclient-service.py: --hip"
+    },
+    {
+      "id": "code-obtain-credential",
+      "kind": "block",
+      "role": "code",
+      "path": "apps/gpclient/src/connect/credential.rs",
+      "start": "pub(super) async fn obtain_credential(",
+      "sha256": "c9fb1eaaa61231e8f325dfba37fb2fe175d4a7acd95e52eb323d2ef60b6aca37",
+      "used_by": "service/nm-gpclient-service.py: AUTH_BANNER_RE, credentials prompt detection"
+    },
+    {
+      "id": "code-obtain-password",
+      "kind": "block",
+      "role": "code",
+      "path": "apps/gpclient/src/connect/credential.rs",
+      "start": "fn obtain_password(",
+      "sha256": "222ca356a8a49721dd33989af0924aa797ec10f1a81cd0636be5ed13603840d1",
+      "used_by": "service/nm-gpclient-service.py: password prompt detection"
+    },
+    {
+      "id": "code-parse-res-xml",
+      "kind": "block",
+      "role": "code",
+      "path": "crates/gpapi/src/portal/prelogin.rs",
+      "start": "fn parse_res_xml(",
+      "sha256": "57157b59d671dde230678903396faaebeb10102c20d7d98be3e083854b27a74b",
+      "used_by": "service/nm-gpclient-service.py: credentials prompt detection (labels, banner)"
+    },
+    {
+      "id": "code-login-gateway-mfa",
+      "kind": "block",
+      "role": "code",
+      "path": "apps/gpclient/src/connect/gateway.rs",
+      "start": "async fn login_gateway(",
+      "sha256": "1847d8b49c05276395fc66ea984e6326d9e5c7b7b371fba8b55ad1dfdb8e9f5f",
+      "used_by": "service/nm-gpclient-service.py: OTP prompt detection (MFA)"
+    },
+    {
+      "id": "code-connect-portal",
+      "kind": "block",
+      "role": "code",
+      "path": "apps/gpclient/src/connect/mod.rs",
+      "start": "async fn connect_portal_with_prelogin(",
+      "sha256": "34167c54e1af160d355e95392f4ee4093d7864984e3002bdcb2fada16321119d",
+      "used_by": "service/nm-gpclient-service.py: GATEWAY_COUNT_RE, GATEWAY_CHOSEN_RE, gateway selection"
+    },
+    {
+      "id": "code-legacy-openssl-detect",
+      "kind": "block",
+      "role": "code",
+      "path": "crates/gpapi/src/error.rs",
+      "start": "pub fn is_legacy_openssl_error(",
+      "sha256": "22e7aae2ce709f13972a493d66ad4b9dc7230c375277c65ac5083d2a0b1fe42a",
+      "used_by": "service/nm-gpclient-service.py: OPENSSL_LEGACY_ERROR_RE"
+    },
+    {
+      "id": "code-retry-hints",
+      "kind": "block",
+      "role": "code",
+      "path": "crates/gpapi/src/clap/mod.rs",
+      "start": "fn retry_hints(",
+      "sha256": "fe17465d0c7c21bf324318f6643a7afb8f00502e1679ef6d63d5ca45f1d43b2a",
+      "used_by": "service/nm-gpclient-service.py: OPENSSL_LEGACY_ERROR_RE"
+    },
+    {
+      "id": "code-gateway-display",
+      "kind": "block",
+      "role": "code",
+      "path": "crates/gpapi/src/gateway/mod.rs",
+      "start": "impl Display for Gateway {",
+      "sha256": "d78851637a2b0007fd513c2c6edc138fe056216aaffae3a0654b535d6b40fbab",
+      "used_by": "service/nm-gpclient-service.py: parsing of 'name (address)' in the gateway list"
+    },
+    {
+      "id": "code-real-user-lookup",
+      "kind": "block",
+      "role": "code",
+      "path": "crates/gpapi/src/process/users.rs",
+      "start": "fn real_user_lookup(",
+      "sha256": "3061ad2386670d8e4e92b688661cb248ae612c0b3813c3507052c9f1f38012d6",
+      "used_by": "service/nm-gpclient-service.py: SUDO_UID environment"
+    },
+    {
+      "id": "test-direct_gateway_recommendation_uses_gateway_server",
+      "kind": "block",
+      "role": "test",
+      "path": "apps/gpclient/src/connect/gateway.rs",
+      "start": "fn direct_gateway_recommendation_uses_gateway_server(",
+      "sha256": "662b38869d9c6e927374a5a768f948023b1a8c0d71e807fa89ee878018c1f535",
+      "used_by": "service/nm-gpclient-service.py: --as-gateway note"
+    },
+    {
+      "id": "test-browser_without_value_uses_auto_mode",
+      "kind": "block",
+      "role": "test",
+      "path": "apps/gpclient/src/connect/args.rs",
+      "start": "fn browser_without_value_uses_auto_mode(",
+      "sha256": "ccb8f6090b7b07ef66d5fc0671600dfe2a20b1b898bd1c0f443e77cd04f56318",
+      "used_by": "service/nm-gpclient-service.py: --browser"
+    },
+    {
+      "id": "test-browser_default_keeps_system_default_mode",
+      "kind": "block",
+      "role": "test",
+      "path": "apps/gpclient/src/connect/args.rs",
+      "start": "fn browser_default_keeps_system_default_mode(",
+      "sha256": "46f65bc2d579cc15fbbfd9db58e16e57ede92f389445c51da15ab82335ed1c30",
+      "used_by": "service/nm-gpclient-service.py: --browser"
+    },
+    {
+      "id": "test-browser_without_value_uses_auto_mode-gpauth",
+      "kind": "block",
+      "role": "test",
+      "path": "apps/gpauth/src/cli.rs",
+      "start": "fn browser_without_value_uses_auto_mode(",
+      "sha256": "917e45894b9495d84fb5c2a4f32781d46db6dc92475099eee37db1c66676aee4",
+      "used_by": "scripts/browser-wrapper.sh: gpauth --browser"
+    },
+    {
+      "id": "test-browser_default_keeps_system_default_mode-gpauth",
+      "kind": "block",
+      "role": "test",
+      "path": "apps/gpauth/src/cli.rs",
+      "start": "fn browser_default_keeps_system_default_mode(",
+      "sha256": "af7f1a9e692cb669c28a1cefe4d65d53b9bd0e566f98f6591ec8f75656a79217",
+      "used_by": "scripts/browser-wrapper.sh: gpauth --browser"
+    },
+    {
+      "id": "test-real_user_lookup_uses_sudo_uid",
+      "kind": "block",
+      "role": "test",
+      "path": "crates/gpapi/src/process/users.rs",
+      "start": "fn real_user_lookup_uses_sudo_uid(",
+      "sha256": "d07cd1b7b8e2fb516fe053f200d4b4fe2e0b548c1939f5c452f2d0f490ceb522",
+      "used_by": "service/nm-gpclient-service.py: SUDO_UID"
+    },
+    {
+      "id": "test-real_user_lookup_uses_pkexec_uid",
+      "kind": "block",
+      "role": "test",
+      "path": "crates/gpapi/src/process/users.rs",
+      "start": "fn real_user_lookup_uses_pkexec_uid(",
+      "sha256": "5382ab2c16c60528c8e46038a3e59078e5023d6fdd2870b3f021bc4ce0c04744",
+      "used_by": "service/nm-gpclient-service.py: SUDO_UID"
+    },
+    {
+      "id": "test-real_user_lookup_uses_doas_user",
+      "kind": "block",
+      "role": "test",
+      "path": "crates/gpapi/src/process/users.rs",
+      "start": "fn real_user_lookup_uses_doas_user(",
+      "sha256": "8129fefbdf7676a381fd51c7c5296cdb6df81d548974b7d1a1efb4308e12e5cb",
+      "used_by": "service/nm-gpclient-service.py: SUDO_UID"
+    },
+    {
+      "id": "test-real_user_lookup_prefers_uid_over_doas_user",
+      "kind": "block",
+      "role": "test",
+      "path": "crates/gpapi/src/process/users.rs",
+      "start": "fn real_user_lookup_prefers_uid_over_doas_user(",
+      "sha256": "1cf66ac72c6595285cd82d86994057584dac658af46f81cb7bc44bc7c87f2292",
+      "used_by": "service/nm-gpclient-service.py: SUDO_UID"
+    },
+    {
+      "id": "test-real_user_lookup_ignores_blank_doas_user",
+      "kind": "block",
+      "role": "test",
+      "path": "crates/gpapi/src/process/users.rs",
+      "start": "fn real_user_lookup_ignores_blank_doas_user(",
+      "sha256": "475b7afdb2345287db2d1d82e155bb16cbc60da83c4afe48f21bd8b7c4dd1261",
+      "used_by": "service/nm-gpclient-service.py: SUDO_UID"
+    },
+    {
+      "id": "test-real_user_lookup_errors_without_root_origin_env",
+      "kind": "block",
+      "role": "test",
+      "path": "crates/gpapi/src/process/users.rs",
+      "start": "fn real_user_lookup_errors_without_root_origin_env(",
+      "sha256": "0ea3fa4c33c4eb6656dcfd132e328efa511cd39c8b9c36fdabe6ad85ea174520",
+      "used_by": "service/nm-gpclient-service.py: SUDO_UID"
+    },
+    {
+      "id": "cargo-inquire",
+      "kind": "cargo-lock",
+      "package": "inquire",
+      "version": "0.9.4",
+      "used_by": "service/nm-gpclient-service.py: ScreenBuffer, EscapeTokenizer, OutputScanner, SELECT_HELP_RE (model the inquire rendering)"
+    },
+    {
+      "id": "cargo-crossterm",
+      "kind": "cargo-lock",
+      "package": "crossterm",
+      "version": "0.29.0",
+      "used_by": "service/nm-gpclient-service.py: EscapeTokenizer, INCOMPLETE_ANSI_RE, CONTROL_CHARS_RE (the crossterm escape sequences)"
+    },
+    {
+      "id": "cargo-unicode-width",
+      "kind": "cargo-lock",
+      "package": "unicode-width",
+      "version": "0.2.2",
+      "used_by": "service/nm-gpclient-service.py: ScreenBuffer (cell width)"
+    }
+  ]
+}

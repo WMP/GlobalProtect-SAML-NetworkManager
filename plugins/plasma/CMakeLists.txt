@@ -58,6 +58,7 @@ endif()
 # Plugin sources
 set(gpclient_SRCS
     gpclientui.cpp
+    gpclientauthwidget.cpp
     gpclientwidget.cpp
 )
 

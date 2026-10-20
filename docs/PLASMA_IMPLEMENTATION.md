@@ -47,8 +47,10 @@ All components have been implemented and are ready for testing:
 
 ```
 GpclientUiPlugin : VpnUiPlugin
-    └── creates GpclientWidget : SettingWidget
-            └── uses UI from gpclientwidget.ui
+    ├── widget() → GpclientWidget : SettingWidget
+    │       └── uses UI from gpclientwidget.ui
+    └── askUser() → GpclientAuthWidget : SettingWidget
+            └── shows only the secrets requested by NetworkManager
 ```
 
 ### Data Flow
@@ -149,7 +151,7 @@ Service: /usr/share/kservices5/
 
 **Key Functions:**
 - `widget()` - Creates configuration widget
-- `askUser()` - Creates authentication dialog (reuses widget)
+- `askUser()` - Creates the authentication widget for the secrets requested by NetworkManager
 - `suggestedFileName()` - Suggests export filename
 
 **Exports:**
@@ -278,12 +280,11 @@ Tested distributions:
 
 Possible improvements:
 
-1. **Authentication Dialog**: Implement custom `askUser()` for password/2FA prompts
-2. **Advanced Options**: Add expander for optional settings
-3. **Connection Wizard**: Step-by-step setup assistant
-4. **Import/Export**: Load .ovpn or similar config files
-5. **Browser Selection**: File picker dialog instead of text entry
-6. **DNS Validation**: Check DNS server format validity
+1. **Advanced Options**: Add expander for optional settings
+2. **Connection Wizard**: Step-by-step setup assistant
+3. **Import/Export**: Load .ovpn or similar config files
+4. **Browser Selection**: File picker dialog instead of text entry
+5. **DNS Validation**: Check DNS server format validity
 
 ## References
 

@@ -4,6 +4,7 @@
 */
 
 #include "gpclientui.h"
+#include "gpclientauthwidget.h"
 #include "gpclientwidget.h"
 
 #include <KPluginFactory>
@@ -24,8 +25,7 @@ SettingWidget *GpclientUiPlugin::widget(const NetworkManager::VpnSetting::Ptr &s
 
 SettingWidget *GpclientUiPlugin::askUser(const NetworkManager::VpnSetting::Ptr &setting, const QStringList &hints, QWidget *parent)
 {
-    Q_UNUSED(hints);
-    return new GpclientWidget(setting, parent);
+    return new GpclientAuthWidget(setting, hints, parent);
 }
 
 QString GpclientUiPlugin::suggestedFileName(const NetworkManager::ConnectionSettings::Ptr &connection) const

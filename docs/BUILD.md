@@ -60,12 +60,12 @@ docker run --rm -v $(pwd)/output:/output gpclient-builder:ubuntu24.04-neon bash 
 
 ### Rust Installation
 
-This project uses GlobalProtect-openconnect which requires **Rust 1.85+**.
+This project uses GlobalProtect-openconnect which requires **Rust 1.89+** (the version in its rust-toolchain.toml).
 The Makefile will automatically install Rust via rustup if not present.
 
 To install manually:
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.85
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.89
 source $HOME/.cargo/env
 ```
 

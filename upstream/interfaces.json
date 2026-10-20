@@ -1,0 +1,251 @@
+{
+  "functions": [
+    {
+      "function": "service/nm-gpclient-service.py::parse_gateway_count",
+      "kind": "reads-output",
+      "upstream": [
+        "gateway-count"
+      ],
+      "tests": [
+        "tests/unit/test_gateway_selection.py::test_count_line_is_recognised",
+        "tests/unit/test_gateway_selection.py::test_other_lines_are_not"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::strip_ansi",
+      "kind": "reads-output",
+      "upstream": [
+        "cargo-crossterm"
+      ],
+      "tests": [
+        "tests/unit/test_interactive_prompts.py::test_csi_color_sequences_removed",
+        "tests/unit/test_interactive_prompts.py::test_plain_text_unchanged"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::parse_auth_banner",
+      "kind": "reads-output",
+      "upstream": [
+        "auth-banner",
+        "login-default-message"
+      ],
+      "tests": [
+        "tests/unit/test_interactive_prompts.py::test_rsa_token_banner",
+        "tests/unit/test_interactive_prompts.py::test_non_banner_lines"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::split_label",
+      "kind": "reads-output",
+      "upstream": [
+        "login-default-username",
+        "login-default-password"
+      ],
+      "tests": [
+        "tests/unit/test_interactive_prompts.py::test_words_and_sub_words_with_offsets",
+        "tests/unit/test_interactive_prompts.py::test_no_words_no_sub_words"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::classify_prompt",
+      "kind": "reads-output",
+      "upstream": [
+        "login-default-username",
+        "login-default-password",
+        "mfa-prompt"
+      ],
+      "tests": [
+        "tests/unit/test_interactive_prompts.py::test_username_labels",
+        "tests/unit/test_interactive_prompts.py::test_password_word_in_parentheses_does_not_make_a_password"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::is_one_time_secret",
+      "kind": "reads-output",
+      "upstream": [
+        "mfa-prompt",
+        "auth-banner"
+      ],
+      "tests": [
+        "tests/unit/test_interactive_prompts.py::test_otp_labels_are_one_time",
+        "tests/unit/test_interactive_prompts.py::test_plain_password_is_not_one_time"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::detect_select_prompt",
+      "kind": "reads-output",
+      "upstream": [
+        "gateway-select-prompt",
+        "cargo-inquire"
+      ],
+      "tests": [
+        "tests/unit/test_gateway_selection.py::test_single_page_frame",
+        "tests/unit/test_gateway_selection.py::test_regular_output_is_not_a_frame"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::resolve_browser",
+      "kind": "runs-upstream",
+      "upstream": [
+        "cli-browser"
+      ],
+      "tests": [
+        "tests/unit/test_gateway_selection.py::test_empty_defaults_to_wrapped_edge",
+        "tests/unit/test_gateway_selection.py::test_without_wrapper_and_binary_the_name_is_returned"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::GpclientVPNPlugin._monitor_gpclient_output",
+      "kind": "reads-output",
+      "upstream": [
+        "gateway-count",
+        "gateway-chosen-selected",
+        "gateway-chosen-only",
+        "auth-banner",
+        "fix-openssl-hint",
+        "legacy-openssl-detect"
+      ],
+      "tests": [
+        "tests/unit/test_select_pty.py::test_username_and_password_are_typed_from_the_profile",
+        "tests/unit/test_select_pty.py::test_no_stored_password_without_interaction_fails_login"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::GpclientVPNPlugin._reset_output_state",
+      "kind": "reads-output",
+      "upstream": [
+        "cargo-inquire",
+        "cargo-crossterm"
+      ],
+      "tests": [
+        "tests/unit/test_one_time_secrets.py::test_decoder_is_reset_for_a_new_attempt",
+        "tests/unit/test_screen_buffer.py::test_reset_forgets_an_open_osc"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::GpclientVPNPlugin._consume_output",
+      "kind": "reads-output",
+      "upstream": [
+        "cargo-crossterm"
+      ],
+      "tests": [
+        "tests/unit/test_one_time_secrets.py::test_sequence_split_across_reads_does_not_leak",
+        "tests/unit/test_one_time_secrets.py::test_complete_sequence_leaves_nothing_carried"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::GpclientVPNPlugin._classify_prompt_kind",
+      "kind": "reads-output",
+      "upstream": [
+        "login-default-username",
+        "login-default-password",
+        "mfa-prompt"
+      ],
+      "tests": [
+        "tests/unit/test_interactive_prompts.py::test_first_prompt_is_username_even_if_localized",
+        "tests/unit/test_interactive_prompts.py::test_password_after_username"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::GpclientVPNPlugin._write_keys",
+      "kind": "runs-upstream",
+      "upstream": [
+        "gateway-select-prompt",
+        "cargo-inquire"
+      ],
+      "tests": [
+        "tests/unit/test_select_pty.py::test_down_key_is_sent_and_the_redraw_is_awaited",
+        "tests/unit/test_gateway_selection.py::test_nothing_is_selected_while_paging"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::GpclientVPNPlugin._start_gpclient",
+      "kind": "runs-upstream",
+      "upstream": [
+        "cli-fix-openssl",
+        "cli-hip",
+        "cli-as-gateway",
+        "cli-user",
+        "cli-browser",
+        "sudo-uid"
+      ],
+      "tests": [
+        "tests/unit/test_upstream_interfaces.py::test_start_gpclient_passes_flags_and_environment",
+        "tests/unit/test_upstream_interfaces.py::test_start_gpclient_leaves_out_optional_flags_by_default",
+        "tests/unit/test_upstream_interfaces.py::test_start_gpclient_fails_cleanly_when_the_binary_is_missing"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::GpclientVPNPlugin.Disconnect",
+      "kind": "runs-upstream",
+      "upstream": [
+        "cli-disconnect-subcommand",
+        "lock-file"
+      ],
+      "tests": [
+        "tests/unit/test_upstream_interfaces.py::test_disconnect_terminates_gpclient_and_runs_gpclient_disconnect",
+        "tests/unit/test_upstream_interfaces.py::test_disconnect_survives_a_failing_gpclient_disconnect"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::GpclientVPNPlugin._cleanup_stale_gpd0",
+      "kind": "runs-upstream",
+      "upstream": [
+        "cli-disconnect-subcommand",
+        "lock-file"
+      ],
+      "tests": [
+        "tests/unit/test_upstream_interfaces.py::test_cleanup_stale_gpd0_runs_the_cleanup_without_gpclient",
+        "tests/unit/test_upstream_interfaces.py::test_cleanup_stale_gpd0_does_nothing_while_gpclient_runs",
+        "tests/unit/test_upstream_interfaces.py::test_cleanup_stale_gpd0_does_nothing_without_gpd0"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::GpclientVPNPlugin._close_pty",
+      "kind": "reads-output",
+      "upstream": [
+        "cargo-inquire"
+      ],
+      "tests": [
+        "tests/unit/test_upstream_interfaces.py::test_close_pty_closes_the_fd_and_resets_it",
+        "tests/unit/test_upstream_interfaces.py::test_close_pty_without_a_pty_does_nothing_twice"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::ScreenBuffer._write",
+      "kind": "reads-output",
+      "upstream": [
+        "cargo-inquire",
+        "cargo-crossterm",
+        "cargo-unicode-width"
+      ],
+      "tests": [
+        "tests/unit/test_upstream_interfaces.py::test_screen_buffer_write_puts_text_at_the_cursor",
+        "tests/unit/test_upstream_interfaces.py::test_screen_buffer_write_gives_wide_characters_two_cells",
+        "tests/unit/test_upstream_interfaces.py::test_screen_buffer_write_drops_control_characters"
+      ]
+    },
+    {
+      "function": "service/nm-gpclient-service.py::tokens_text",
+      "kind": "reads-output",
+      "upstream": [
+        "cargo-crossterm"
+      ],
+      "tests": [
+        "tests/unit/test_upstream_interfaces.py::test_tokens_text_joins_the_text_tokens",
+        "tests/unit/test_upstream_interfaces.py::test_tokens_text_removes_control_characters_and_escape_tokens"
+      ]
+    },
+    {
+      "function": "scripts/browser-wrapper.sh",
+      "kind": "runs-upstream",
+      "upstream": [
+        "cli-browser"
+      ],
+      "tests": [
+        "tests/unit/test_browser_wrapper.py::test_accepts_username_with_a_dot",
+        "tests/unit/test_browser_wrapper.py::test_non_root_rejects_bad_id_output"
+      ]
+    }
+  ]
+}

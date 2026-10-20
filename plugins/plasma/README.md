@@ -179,6 +179,7 @@ Or log out and log back in to KDE.
 ### Files
 
 - `gpclientui.h/cpp` - Main plugin class implementing `VpnUiPlugin`
+- `gpclientauthwidget.h/cpp` - Authentication widget for requested VPN secrets
 - `gpclientwidget.h/cpp` - Configuration widget implementing `SettingWidget`
 - `gpclientwidget.ui` - Qt Designer UI definition
 - `plasmanetworkmanagement_gpclientui.json` - KPlugin metadata

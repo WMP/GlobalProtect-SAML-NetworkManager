@@ -1887,12 +1887,6 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             env["TERM"] = "xterm-256color"
 
             master_fd, slave_fd = pty.openpty()
-            # Wide window so prompts don't wrap mid-line
-            fcntl.ioctl(
-                master_fd,
-                termios.TIOCSWINSZ,
-                struct.pack("HHHH", PTY_ROWS, PTY_COLUMNS, 0, 0),
-            )
 
             def _child_setup():
                 # New session + make the PTY slave (fd 0) the controlling
@@ -1901,6 +1895,12 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                 fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
             try:
+                # Wide window so prompts don't wrap mid-line
+                fcntl.ioctl(
+                    master_fd,
+                    termios.TIOCSWINSZ,
+                    struct.pack("HHHH", PTY_ROWS, PTY_COLUMNS, 0, 0),
+                )
                 self.gpclient_process = await asyncio.create_subprocess_exec(
                     *cmd,
                     env=env,
@@ -1909,6 +1909,10 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                     stderr=slave_fd,
                     preexec_fn=_child_setup,
                 )
+            except BaseException:
+                # Nobody owns the master yet (_pty_master is set below)
+                os.close(master_fd)
+                raise
             finally:
                 os.close(slave_fd)
 
