@@ -25,6 +25,14 @@ gnome)
         gsettings set org.gnome.Settings show-development-warning false
         gsettings set org.gnome.shell favorite-apps \
             "[\"microsoft-edge.desktop\", \"org.gnome.Nautilus.desktop\", \"org.gnome.Settings.desktop\", \"org.gnome.Terminal.desktop\"]"
+        # Terminal: large readable font, 110x30
+        uuid=$(gsettings get org.gnome.Terminal.ProfilesList default | tr -d "\047")
+        profile="org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$uuid/"
+        gsettings set "$profile" use-system-font false
+        gsettings set "$profile" font "Ubuntu Mono 16"
+        gsettings set "$profile" default-size-columns 110
+        gsettings set "$profile" default-size-rows 30
+        gsettings set "$profile" audible-bell false
         /usr/libexec/gsd-xsettings &
         exec gnome-shell --x11'
     ;;

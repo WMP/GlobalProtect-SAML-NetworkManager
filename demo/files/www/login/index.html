@@ -111,6 +111,11 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .busy div:last-child { margin-top: 14px; font-size: 15px; }
   .card { position: relative; }
+  .tile { display: flex; align-items: center; margin: 22px 0 8px; padding: 10px 12px; background: #f2f2f2; }
+  .tile .avatar { width: 40px; height: 40px; border-radius: 50%; background: #0067b8; color: #fff; flex: none;
+    display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 600; margin-right: 14px; }
+  .tile .name { font-size: 15px; font-weight: 600; }
+  .tile .email { font-size: 13px; color: #404040; }
 
   footer { position: fixed; z-index: 2; right: 0; bottom: 0; padding: 14px 18px; font-size: 12px; display: flex; gap: 18px; }
   footer a { font-size: 12px; color: #2b2b2b; }
@@ -136,6 +141,13 @@
       <path d="M14 9 19 14 14 19 9 14Z" fill="#fff"/>
       <text x="37" y="21" font-family='"Segoe UI","Segoe UI Web (West European)",-apple-system,"Noto Sans","Ubuntu","Helvetica Neue",Arial,sans-serif' font-size="21" font-weight="600" fill="#1b1b1b" letter-spacing=".2">Contoso</text>
     </svg>
+
+    <!-- 0: known account (the sign-in cookie is set): signs in by itself -->
+    <div class="step" id="s-tile">
+      <h1>Pick an account</h1>
+      <div class="tile"><div class="avatar">AM</div><div><div class="name">Alex Morgan</div><div class="email"></div></div></div>
+      <p>Signing in&hellip;</p>
+    </div>
 
     <!-- 1: email -->
     <div class="step active" id="s-email">
@@ -197,7 +209,7 @@
 <script>
 (function () {
   var DONE_URL = "https://vpn.contoso.example/global-protect/authenticated.html";
-  var order = ["email", "password", "approve", "stay"];
+  var order = ["tile", "email", "password", "approve", "stay"];
   var current = "email", email = "", timer = null, finished = false;
   var $ = function (id) { return document.getElementById(id); };
 
@@ -233,6 +245,11 @@
     $("password-err").className = "error" + (bad ? " show" : "");
     $("password").className = "input" + (bad ? " bad" : "");
     if (bad) { $("password").focus(); return; }
+    // Remember the account for the next sign-in. localStorage, not a cookie:
+    // the wrapper stops the browser about 3 s after the sign-in, which is
+    // before a cookie would reach the disk (30 s) but after localStorage does
+    // (5 s), because this is saved when the password is entered.
+    try { localStorage.setItem("contoso_sso", email); } catch (e) {}
     show("approve");
   }
 
@@ -271,7 +288,17 @@
     else if (current === "stay") finish();
   });
 
-  show("email");
+  var known = null;
+  try { known = localStorage.getItem("contoso_sso"); } catch (e) {}
+  if (known) {
+    // Signed in before: the account is known, so sign in by itself
+    email = known;
+    fillEmail();
+    show("tile");
+    setTimeout(finish, 1500);
+  } else {
+    show("email");
+  }
 })();
 </script>
 </body>

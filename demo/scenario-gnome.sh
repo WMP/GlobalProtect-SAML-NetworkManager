@@ -4,7 +4,7 @@
 source /opt/gp-demo/lib.sh
 EDGE_DX=${EDGE_DX:-0}
 EDGE_DY=${EDGE_DY:-0}
-EDGE_POS="545 55"
+EDGE_POS="545 91"
 
 pause 1.5
 shot step-01-desktop

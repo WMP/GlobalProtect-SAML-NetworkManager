@@ -18,10 +18,13 @@ log() { echo "$(date +%T) $*" | tee -a "$LOG"; }
 
 # Docker writes /etc/hosts at run time, so the fictional hosts are added here
 echo "127.0.0.1 vpn.contoso.example login.contoso.example" >> /etc/hosts
-hostname demo-laptop 2>/dev/null || true
+echo demo-laptop > /proc/sys/kernel/hostname 2> /dev/null || true
 
-# The desktop must not see systemd or logind (there are none)
-rm -rf /run/systemd
+# gnome-shell takes /run/systemd/seats for a sign of logind (there is none);
+# systemd-resolved needs /run/systemd/resolve
+rm -rf /run/systemd/seats /run/systemd/sessions /run/systemd/users
+mkdir -p /run/systemd/resolve
+chown systemd-resolve:systemd-resolve /run/systemd/resolve
 
 log "udev"
 /usr/lib/systemd/systemd-udevd --daemon
@@ -32,9 +35,15 @@ log "system D-Bus"
 mkdir -p /run/dbus
 dbus-daemon --system --fork
 
+log "systemd-resolved"
+# Docker bind-mounts /etc/resolv.conf; use the stub of systemd-resolved as Ubuntu does
+umount /etc/resolv.conf 2> /dev/null
+ln -sf ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+/usr/lib/systemd/systemd-resolved > "$OUT/systemd-resolved.log" 2>&1 &
+for _ in $(seq 40); do resolvectl status > /dev/null 2>&1 && break; sleep 0.25; done
+
 log "network"
 ip link add enp0s31f6 type veth peer name ethpeer
-ip addr add 192.168.1.1/24 dev ethpeer
 ip link set ethpeer up
 udevadm settle
 NetworkManager --no-daemon > "$OUT/NetworkManager.log" 2>&1 &
@@ -75,9 +84,11 @@ as_demo ffmpeg -nostdin -y -f x11grab -framerate 25 -video_size 1920x1080 -i :1 
     -c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p /tmp/raw.mp4 > "$OUT/ffmpeg.log" 2>&1 &
 FFMPEG_PID=$!
 sleep 1
+date +%s.%N > /tmp/recording-start
 log "scenario start"
 as_demo env DEMO_OUT="$OUT" DEMO_DE="$DE" bash "$SCENARIO" > "$OUT/scenario.log" 2>&1
-log "scenario end (exit $?)"
+STATUS=$?
+log "scenario end (exit $STATUS)"
 sleep 1
 pkill -INT -u $DEMO_UID -x ffmpeg
 for _ in $(seq 60); do kill -0 $FFMPEG_PID 2>/dev/null || break; sleep 0.5; done
@@ -86,6 +97,8 @@ cp /tmp/raw.mp4 "$OUT/raw.mp4"
 # Logs: the service logs to stderr, which NetworkManager forwards to its log
 cp /tmp/edge-wrapper-$DEMO_UID.log "$OUT/edge-wrapper.log" 2>/dev/null || true
 nmcli -t -f NAME,TYPE,STATE connection show --active > "$OUT/nmcli-active.txt" 2>&1
+{ ip route; resolvectl status; } > "$OUT/network-state.txt" 2>&1
 ip -4 addr show gpd0 > "$OUT/gpd0.txt" 2>&1
 chmod -R a+rwX "$OUT" 2>/dev/null || true
 log "done"
+exit "$STATUS"

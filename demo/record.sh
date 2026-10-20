@@ -18,9 +18,9 @@ repo="$(dirname "$here")"
 out_base="${DEMO_OUT_DIR:-$here/out}"
 target="${1:-all}"
 case "$target" in
-gnome | kde) targets=("$target") ;;
+gnome | kde | routing) targets=("$target") ;;
 all) targets=(gnome kde) ;;
-*) echo "usage: $0 [gnome|kde|all]" >&2; exit 2 ;;
+*) echo "usage: $0 [gnome|kde|routing|all]" >&2; exit 2 ;;
 esac
 
 export DOCKER_BUILDKIT=1
@@ -37,17 +37,24 @@ build_image() {
 }
 
 make_gif() {
-    local de="$1" outdir="$2" gif="$repo/docs/images/demo-$de.gif"
-    local fps="${GIF_FPS:-12}" trim="${GIF_TRIM_START:-0}"
+    local de="$1" outdir="$2" gif="$repo/docs/images/demo-$de.gif" tmpgif
+    local fps="${GIF_FPS:-12}" trim="${GIF_TRIM_START:-}"
+    if [ -z "$trim" ]; then
+        trim=0
+        [ -s "$outdir/trim-start" ] && trim="$(cat "$outdir/trim-start")"
+    fi
     local filters="fps=$fps,scale=1280:-1:flags=lanczos" pal
+    [ "$de" = routing ] && gif="$repo/docs/images/demo-routing-dns.gif"
     pal="$(mktemp --suffix=.png)"
+    tmpgif="$(mktemp --suffix=.gif)"
     mkdir -p "$(dirname "$gif")"
     ffmpeg -nostdin -y -loglevel error -ss "$trim" -i "$outdir/raw.mp4" \
         -vf "$filters,palettegen=stats_mode=diff:max_colors=256" "$pal"
     ffmpeg -nostdin -y -loglevel error -ss "$trim" -i "$outdir/raw.mp4" -i "$pal" \
         -lavfi "$filters [x]; [x][1:v] paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
-        -loop 0 "$gif"
+        -loop 0 "$tmpgif"
     rm -f "$pal"
+    mv -f "$tmpgif" "$gif"
     local size
     size=$(stat -c %s "$gif")
     echo "GIF: $gif ($((size / 1024)) KiB)"
@@ -58,14 +65,24 @@ make_gif() {
 
 for de in "${targets[@]}"; do
     outdir="$out_base/$de"
+    image="$de"
+    scenario="${DEMO_SCENARIO:-}"
+    if [ "$de" = routing ]; then
+        image=gnome
+        scenario="${DEMO_SCENARIO:-$here/scenario-routing-gnome.sh}"
+    fi
     rm -rf "$outdir"
     mkdir -p "$outdir"
-    [ "${SKIP_BUILD:-0}" = 1 ] || build_image "$de"
+    [ "${SKIP_BUILD:-0}" = 1 ] || build_image "$image"
     run=(docker run --rm --privileged --network none -v "$outdir:/out")
-    if [ -n "${DEMO_SCENARIO:-}" ]; then
-        run+=(-v "$(readlink -f "$DEMO_SCENARIO"):/opt/gp-demo/scenario.sh:ro")
+    if [ -n "$scenario" ]; then
+        run+=(-v "$(readlink -f "$scenario"):/opt/gp-demo/scenario.sh:ro")
     fi
-    "${run[@]}" "gpclient-demo-$de"
+    # A failed scenario (non-zero exit) stops the script before the GIF is made
+    if ! "${run[@]}" "gpclient-demo-$image"; then
+        echo "The scenario failed: see $outdir/scenario.log and $outdir/failure.png" >&2
+        exit 1
+    fi
     if [ ! -s "$outdir/raw.mp4" ]; then
         echo "no recording in $outdir (see start.log, desktop.log, scenario.log)" >&2
         exit 1

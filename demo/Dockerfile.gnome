@@ -23,6 +23,7 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl gnupg sudo iproute2 procps openssl libnss3-tools udev \
+        vpnc-scripts systemd-resolved \
         network-manager python3 python3-sdbus python3-gi gir1.2-gtk-3.0 \
         libnma0 libnma-gtk4-0 \
         dbus dbus-x11 xvfb xdotool ffmpeg x11-utils xauth libgl1-mesa-dri \

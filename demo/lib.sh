@@ -158,3 +158,20 @@ edge_signin() {
     shot step-edge-5-done
     wait_window_gone "Sign in|GlobalProtect Portal" 30 || fail "the Edge window did not close by itself"
 }
+
+# Marks the start of the part that goes into the GIF: record.sh cuts what
+# comes before (setup that must not be shown). Writes "$DEMO_OUT/trim-start".
+mark_start() {
+    awk -v now="$(date +%s.%N)" -v start="$(cat /tmp/recording-start 2> /dev/null || echo 0)" \
+        'BEGIN { d = now - start; print (start == 0 || d < 0 ? 0 : d) }' > "$DEMO_OUT/trim-start"
+}
+
+# The sign-in when the sign-in cookie exists: the page picks the account and
+# finishes by itself. Waits until the window is gone.
+edge_sso_auto() {
+    local win
+    win=$(wait_for_window "Sign in" 60) || fail "the Edge sign-in window did not open"
+    [ -n "${EDGE_POS:-}" ] && xdotool windowmove "$win" ${EDGE_POS}
+    shot step-edge-auto
+    wait_window_gone "Sign in|GlobalProtect Portal" 30 || fail "the Edge window did not close by itself"
+}

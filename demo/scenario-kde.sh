@@ -4,7 +4,7 @@
 source /opt/gp-demo/lib.sh
 EDGE_DX=${EDGE_DX:-0}
 EDGE_DY=${EDGE_DY:-0}
-EDGE_POS="480 20"
+EDGE_POS="512 48"
 
 pause 1.5
 shot step-01-desktop
@@ -66,3 +66,16 @@ pause 1.0
 click 1742 1048
 pause 1.5
 shot step-10-tray-vpn
+smooth_move 1600 777 0.5
+pause 0.6
+click 1822 777
+edge_signin
+wait_vpn "Contoso VPN" activated 60 || fail "the VPN did not become active"
+pause 2.0
+shot step-11-notification
+click 1742 1048
+pause 1.5
+shot step-12-tray-connected
+pause 2.5
+key Escape
+pause 1.0
