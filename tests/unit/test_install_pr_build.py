@@ -15,6 +15,7 @@ import os
 import shlex
 import subprocess
 import sys
+import urllib.parse
 
 import pytest
 
@@ -88,7 +89,8 @@ case "$url" in
         [ -z "$fmt" ] || printf '%s' "$status"
         ;;
     *)
-        file="$FAKE_DIR/serve/$(basename "$url")"
+        base="$(basename "$url")"
+        file="$FAKE_DIR/serve/$(printf '%b' "${base//%/\\x}")"
         if [ ! -f "$file" ]; then
             echo "curl: (22) The requested URL returned error: 404" >&2
             exit 22
@@ -174,7 +176,7 @@ class Sandbox:
 
     def set_assets(self, names, base=TAG_URL):
         body = {"tag_name": "pr-24", "prerelease": True,
-                "assets": [{"name": n, "browser_download_url": f"{base}/{n}"} for n in names]}
+                "assets": [{"name": n, "browser_download_url": f"{base}/{urllib.parse.quote(n, safe='')}"} for n in names]}
         (self.fake / "api_body").write_text(json.dumps(body))
         for name in names:
             (self.fake / "serve" / name).write_text(f"deb:{name}\n")
@@ -657,6 +659,53 @@ class TestRejected:
     )
     def test_a_download_address_of_another_release_or_plain_http_is_refused(self, box, base):
         box.set_assets(all_assets(), base=base)
+
+        result = box.run("24", api=False)
+
+        assert_rejected(box, result, "unexpected download address")
+
+    def test_a_pr_build_with_the_plus_encoded_like_github_is_installed_by_default(self, box):
+        box.set_assets(all_assets(build=BUILD))
+        assert "%2B" in box.read("api_body")
+
+        result = box.run("24", api=False)
+
+        assert result.returncode == 0, result.stderr
+        assert box.installed() == [deb(s, "noble", "amd64", build=BUILD) for s in ("", "-gnome")]
+        assert box.curl_urls()[1] == f"{TAG_URL}/{deb('', 'noble', 'amd64', build=BUILD).replace('+', '%2B')}"
+        assert (box.fake / "apt_payloads").read_text().startswith("deb:")
+
+    def test_a_pr_build_with_a_plain_plus_in_the_address_is_installed_too(self, box):
+        box.set_assets(all_assets(build=BUILD))
+        name = deb("", "noble", "amd64", build=BUILD)
+        body = box.read("api_body").replace(name.replace("+", "%2B"), name)
+        box.set_api_body(body)
+
+        result = box.run("24", api=False)
+
+        assert result.returncode == 0, result.stderr
+
+    @pytest.mark.parametrize(
+        "base, replace",
+        [
+            ("https://evil.example/pr-24", None),
+            (f"https://github.com/other/repo/releases/download/pr-24", None),
+            (f"https://github.com/{REPO}/releases/download/pr-25", None),
+            (f"http://github.com/{REPO}/releases/download/pr-24", None),
+            (f"https://github.com.evil.example/{REPO}/releases/download/pr-24", None),
+            (TAG_URL, ("%2B", "%252B")),
+            (TAG_URL, ("%2Bpr24", "%2Fpr24")),
+            (TAG_URL, ("noble1%2B", "noble2%2B")),
+            (TAG_URL, ("pr-24/network-manager-gpclient_", "pr-24/..%2Fnetwork-manager-gpclient_")),
+            (TAG_URL, ("pr-24/network-manager-gpclient_", "pr-24/../network-manager-gpclient_")),
+            (TAG_URL, ("pr-24/network-manager-gpclient_", "pr-24/other-package_")),
+            (TAG_URL, ('_amd64.deb"}', '_amd64.deb?x=1"}')),
+        ],
+    )
+    def test_a_pr_build_with_a_wrong_download_address_is_refused_by_default(self, box, base, replace):
+        box.set_assets(all_assets(build=BUILD), base=base)
+        if replace:
+            box.set_api_body(box.read("api_body").replace(*replace))
 
         result = box.run("24", api=False)
 
