@@ -1,3 +1,31 @@
 {
-  "records": []
+  "records": [
+    {
+      "commit": "9e4f45997ebee452c58d7d3066dcfc175d65ef82",
+      "tag": "v3.1.0",
+      "pr": 40,
+      "tester": "Ace Of Snakes",
+      "date": "2026-10-20",
+      "systems": [
+        {
+          "ubuntu": "26.04",
+          "arch": "amd64",
+          "desktop": "plasma"
+        }
+      ],
+      "scenarios": {
+        "install": "pass",
+        "saml-login": "pass",
+        "disconnect": "pass",
+        "reconnect": "pass",
+        "gateway-selection": "pass",
+        "credentials-prompt": "pass",
+        "otp-prompt": "pass",
+        "fix-openssl": "n/a",
+        "hip": "n/a"
+      },
+      "result": "pass",
+      "notes": "MFA with ubikey"
+    }
+  ]
 }
