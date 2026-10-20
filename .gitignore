@@ -77,3 +77,6 @@ artifacts/
 
 # Claude Code
 .claude/
+
+# Demo recordings
+demo/out/

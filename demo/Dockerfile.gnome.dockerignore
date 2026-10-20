@@ -1,0 +1,10 @@
+.git
+external
+docs
+tests
+upstream
+debian
+demo/out
+output
+build
+*.deb

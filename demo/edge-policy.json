@@ -1,0 +1,21 @@
+{
+  "HideFirstRunExperience": true,
+  "BrowserSignin": 0,
+  "SyncDisabled": true,
+  "DefaultBrowserSettingEnabled": false,
+  "ShowRecommendationsEnabled": false,
+  "PersonalizationReportingEnabled": false,
+  "AutoImportAtFirstRun": 4,
+  "EdgeShoppingAssistantEnabled": false,
+  "HubsSidebarEnabled": false,
+  "EdgeEntraCopilotPageContext": false,
+  "NewTabPageContentEnabled": false,
+  "PasswordManagerEnabled": false,
+  "MetricsReportingEnabled": false,
+  "BackgroundModeEnabled": false,
+  "StartupBoostEnabled": false,
+  "ImportOnEachLaunch": false,
+  "PromotionalTabsEnabled": false,
+  "ShowMicrosoftRewards": false,
+  "SpotlightExperiencesAndRecommendationsEnabled": false
+}
