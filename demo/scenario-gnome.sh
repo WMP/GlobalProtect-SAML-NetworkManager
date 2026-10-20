@@ -8,6 +8,7 @@ EDGE_POS="545 91"
 
 pause 1.5
 shot step-01-desktop
+snapshot start
 
 # 1. Settings from the dock; it opens on the Network panel
 click 33 196
@@ -62,6 +63,7 @@ edge_signin
 wait_vpn "Contoso VPN" activated 60 || fail "the VPN did not become active"
 pause 1.5
 shot step-08-connected
+snapshot connected
 
 # 5. Close Settings, show the VPN in the quick settings
 click $((SX + 1057)) $((SY + 23))
@@ -73,3 +75,4 @@ shot step-09-quick-settings
 pause 2.5
 key Escape
 pause 1.0
+snapshot end

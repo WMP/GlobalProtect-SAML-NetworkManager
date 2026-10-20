@@ -16,6 +16,7 @@
 #   wait_window_gone <name-regex> [timeout]  1 on timeout
 #   wait_vpn <name> <state> [timeout]        wait for an nmcli state, 1 on timeout
 #   shot <name>                              screenshot "$DEMO_OUT/<name>.png"
+#   snapshot <name>                          save the network state to "$DEMO_OUT/state-<name>.txt"
 #
 # A scenario fails loudly: use `|| fail "message"` after every wait.
 
@@ -32,6 +33,24 @@ fail() {
 
 shot() { screenshot "$DEMO_OUT/$1.png"; }
 
+# The state a check can read: connections, addresses, routes and DNS
+snapshot() {
+    {
+        echo "## nmcli connection show --active"
+        nmcli -t -f NAME,TYPE,STATE,DEVICE connection show --active
+        echo "## ip -4 addr show gpd0"
+        ip -4 addr show gpd0 2>&1
+        echo "## ip route"
+        ip route
+        echo "## resolvectl dns"
+        resolvectl dns 2>&1
+        echo "## resolvectl domain"
+        resolvectl domain 2>&1
+        echo "## windows"
+        xdotool search --onlyvisible --name "." 2> /dev/null | while read -r w; do xdotool getwindowname "$w"; done
+    } > "$DEMO_OUT/state-$1.txt" 2>&1
+}
+
 win_box() {
     local out
     out=$(xwininfo -id "$1" 2> /dev/null) || return 1
@@ -44,7 +63,7 @@ win_box() {
 
 wait_window_gone() {
     local regex="$1" timeout="${2:-30}" end
-    end=$((SECONDS + timeout))
+    end=$((SECONDS + $(scaled "$timeout")))
     while [ "$SECONDS" -lt "$end" ]; do
         [ -z "$(xdotool search --onlyvisible --name "$regex" 2> /dev/null)" ] && return 0
         sleep 0.5
@@ -54,7 +73,7 @@ wait_window_gone() {
 
 wait_vpn() {
     local name="$1" state="$2" timeout="${3:-60}" end
-    end=$((SECONDS + timeout))
+    end=$((SECONDS + $(scaled "$timeout")))
     while [ "$SECONDS" -lt "$end" ]; do
         nmcli -t -f NAME,STATE connection show --active 2> /dev/null | grep -qx "$name:$state" && return 0
         sleep 0.5
@@ -62,9 +81,12 @@ wait_vpn() {
     return 1
 }
 
+# All waits multiply their timeout by DEMO_TIMEOUT_SCALE (default 1)
+scaled() { echo $(($1 * ${DEMO_TIMEOUT_SCALE:-1})); }
+
 wait_for_window() {
     local regex="$1" timeout="${2:-30}" end id
-    end=$((SECONDS + timeout))
+    end=$((SECONDS + $(scaled "$timeout")))
     while [ "$SECONDS" -lt "$end" ]; do
         id=$(xdotool search --onlyvisible --name "$regex" 2>/dev/null | tail -n 1)
         if [ -n "$id" ]; then

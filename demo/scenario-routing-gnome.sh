@@ -45,6 +45,7 @@ pause 1.2
 win_box "$term" || fail "cannot read the terminal geometry"
 TX=$((WX + WW / 2)); TY=$((WY + WH / 2))
 shot step-01-terminal
+snapshot before
 say "Before connecting"
 run "ip route"
 pause 2.5
@@ -65,6 +66,7 @@ run "resolvectl dns"
 run "resolvectl domain"
 pause 3.0
 shot step-02-connected-default
+snapshot connected-default
 
 # --- 3. Disconnect, set "only for resources on its network" ----------------
 quick_vpn
@@ -73,6 +75,7 @@ for _ in $(seq 40); do
     sleep 0.5
 done
 pause 1.5
+snapshot disconnected
 key Escape
 pause 0.8
 click 33 196
@@ -113,3 +116,4 @@ run "resolvectl dns"
 run "resolvectl domain"
 pause 3.5
 shot step-06-connected-never-default
+snapshot connected-never-default

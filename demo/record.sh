@@ -74,7 +74,7 @@ for de in "${targets[@]}"; do
     rm -rf "$outdir"
     mkdir -p "$outdir"
     [ "${SKIP_BUILD:-0}" = 1 ] || build_image "$image"
-    run=(docker run --rm --privileged --network none -v "$outdir:/out")
+    run=(docker run --rm --privileged --network none --hostname demo-laptop -v "$outdir:/out")
     if [ -n "$scenario" ]; then
         run+=(-v "$(readlink -f "$scenario"):/opt/gp-demo/scenario.sh:ro")
     fi

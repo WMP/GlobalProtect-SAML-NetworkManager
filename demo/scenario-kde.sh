@@ -8,6 +8,7 @@ EDGE_POS="512 48"
 
 pause 1.5
 shot step-01-desktop
+snapshot start
 
 # 1. Network icon in the tray, then the configure button of the popup
 click 1742 1048
@@ -73,9 +74,11 @@ edge_signin
 wait_vpn "Contoso VPN" activated 60 || fail "the VPN did not become active"
 pause 2.0
 shot step-11-notification
+snapshot connected
 click 1742 1048
 pause 1.5
 shot step-12-tray-connected
 pause 2.5
 key Escape
 pause 1.0
+snapshot end

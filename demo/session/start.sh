@@ -18,7 +18,6 @@ log() { echo "$(date +%T) $*" | tee -a "$LOG"; }
 
 # Docker writes /etc/hosts at run time, so the fictional hosts are added here
 echo "127.0.0.1 vpn.contoso.example login.contoso.example" >> /etc/hosts
-echo demo-laptop > /proc/sys/kernel/hostname 2> /dev/null || true
 
 # gnome-shell takes /run/systemd/seats for a sign of logind (there is none);
 # systemd-resolved needs /run/systemd/resolve
