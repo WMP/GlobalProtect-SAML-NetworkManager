@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<!--
+  Fictional GlobalProtect "authentication complete" page for the README demo
+  (https://vpn.contoso.example/global-protect/authenticated.html). The
+  browser wrapper closes the window about 2 s after the fake gpauth exits.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GlobalProtect Portal</title>
+<link rel="icon" href="data:,">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { font-family: "Segoe UI", "Segoe UI Web (West European)", -apple-system, "Noto Sans", "Ubuntu", "Helvetica Neue", Arial, sans-serif;
+    font-size: 15px; color: #1f2a37; background: #eef1f5; display: flex; flex-direction: column; }
+  header { height: 64px; flex: none; background: linear-gradient(90deg, #14233a, #1d3557); color: #fff;
+    display: flex; align-items: center; padding: 0 28px; box-shadow: 0 2px 8px rgba(0, 0, 0, .25); }
+  header svg { width: 36px; height: 36px; margin-right: 12px; }
+  header .name { font-size: 20px; font-weight: 600; letter-spacing: .2px; }
+  header .portal { margin-left: auto; font-size: 13px; color: #b9c6d8; }
+  main { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px 24px 80px; }
+  .card { width: 560px; max-width: 100%; background: #fff; border-radius: 6px; padding: 44px 48px 40px; text-align: center;
+    box-shadow: 0 1px 3px rgba(16, 32, 56, .12), 0 8px 28px rgba(16, 32, 56, .10); }
+  .brand { display: block; height: 28px; margin: 0 auto 26px; }
+  h1 { margin: 0; font-size: 24px; font-weight: 600; line-height: 1.3; }
+  .sub { margin: 6px 0 0; color: #5b6b7f; font-size: 14px; }
+  footer { flex: none; padding: 18px; text-align: center; font-size: 12px; color: #7a8899; }
+  .ok { width: 76px; height: 76px; margin: 30px auto 22px; border-radius: 50%; background: #e3f6ea;
+    display: flex; align-items: center; justify-content: center; animation: pop .45s ease-out; }
+  .ok svg { width: 44px; height: 44px; }
+  .ok path { stroke-dasharray: 40; stroke-dashoffset: 40; animation: draw .45s .2s ease-out forwards; }
+  @keyframes pop { from { transform: scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  .msg { margin: 18px 0 0; color: #33445a; font-size: 15px; line-height: 22px; }
+  .hint { margin: 22px 0 0; padding-top: 18px; border-top: 1px solid #e6ebf1; color: #5b6b7f; font-size: 14px; }
+</style>
+</head>
+<body>
+<header>
+  <svg viewBox="0 0 36 36" aria-hidden="true">
+    <path d="M18 2 31 7v10c0 8.5-5.4 14.6-13 17C10.4 31.6 5 25.5 5 17V7Z" fill="#2f80ed"/>
+    <path d="M18 2 31 7v10c0 8.5-5.4 14.6-13 17Z" fill="#1f63c4"/>
+    <circle cx="18" cy="17" r="8" fill="none" stroke="#fff" stroke-width="1.6"/>
+    <ellipse cx="18" cy="17" rx="3.4" ry="8" fill="none" stroke="#fff" stroke-width="1.4"/>
+    <path d="M10 17h16M11 13h14M11 21h14" stroke="#fff" stroke-width="1.2" fill="none"/>
+  </svg>
+  <span class="name">GlobalProtect</span>
+  <span class="portal">vpn.contoso.example</span>
+</header>
+<main>
+  <div class="card">
+    <svg class="brand" viewBox="0 0 132 28" role="img" aria-label="Contoso">
+      <path d="M14 1 27 14 14 27 1 14Z" fill="#0067b8"/>
+      <path d="M14 1 27 14H20L14 8Z" fill="#00a3a3"/>
+      <path d="M14 9 19 14 14 19 9 14Z" fill="#fff"/>
+      <text x="37" y="21" font-family="&quot;Segoe UI&quot;,&quot;Segoe UI Web (West European)&quot;,-apple-system,&quot;Noto Sans&quot;,&quot;Ubuntu&quot;,&quot;Helvetica Neue&quot;,Arial,sans-serif" font-size="21" font-weight="600" fill="#1b1b1b" letter-spacing=".2">Contoso</text>
+    </svg>
+    <div class="ok"><svg viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="20" fill="#1e9e57"/><path d="M12.5 22.5l7 7 12-14" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <h1>Authentication complete</h1>
+    <p class="msg">You are signed in to Contoso Corporate VPN as <strong>alex.morgan@contoso.example</strong>.</p>
+    <p class="hint">You can close this window. GlobalProtect is connecting&hellip;</p>
+  </div>
+</main>
+<footer>&copy; 2026 Contoso Ltd. All rights reserved.</footer>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<!--
+  Fictional GlobalProtect portal page for the README demo. Served for
+  https://vpn.contoso.example/global-protect/prelogin.esp (see sso-server.py);
+  after 2 s it sends the browser to the sign-in page.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GlobalProtect Portal</title>
+<link rel="icon" href="data:,">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { font-family: "Segoe UI", "Segoe UI Web (West European)", -apple-system, "Noto Sans", "Ubuntu", "Helvetica Neue", Arial, sans-serif;
+    font-size: 15px; color: #1f2a37; background: #eef1f5; display: flex; flex-direction: column; }
+  header { height: 64px; flex: none; background: linear-gradient(90deg, #14233a, #1d3557); color: #fff;
+    display: flex; align-items: center; padding: 0 28px; box-shadow: 0 2px 8px rgba(0, 0, 0, .25); }
+  header svg { width: 36px; height: 36px; margin-right: 12px; }
+  header .name { font-size: 20px; font-weight: 600; letter-spacing: .2px; }
+  header .portal { margin-left: auto; font-size: 13px; color: #b9c6d8; }
+  main { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px 24px 80px; }
+  .card { width: 560px; max-width: 100%; background: #fff; border-radius: 6px; padding: 44px 48px 40px; text-align: center;
+    box-shadow: 0 1px 3px rgba(16, 32, 56, .12), 0 8px 28px rgba(16, 32, 56, .10); }
+  .brand { display: block; height: 28px; margin: 0 auto 26px; }
+  h1 { margin: 0; font-size: 24px; font-weight: 600; line-height: 1.3; }
+  .sub { margin: 6px 0 0; color: #5b6b7f; font-size: 14px; }
+  footer { flex: none; padding: 18px; text-align: center; font-size: 12px; color: #7a8899; }
+  .spinner { width: 40px; height: 40px; margin: 34px auto 18px; border-radius: 50%; border: 4px solid #d9e4f3;
+    border-top-color: #2f80ed; animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .msg { margin: 0; color: #33445a; font-size: 15px; }
+  .host { display: inline-block; margin-top: 22px; padding: 4px 12px; border-radius: 12px; background: #eef3fa; color: #3d5a80; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <svg viewBox="0 0 36 36" aria-hidden="true">
+    <path d="M18 2 31 7v10c0 8.5-5.4 14.6-13 17C10.4 31.6 5 25.5 5 17V7Z" fill="#2f80ed"/>
+    <path d="M18 2 31 7v10c0 8.5-5.4 14.6-13 17Z" fill="#1f63c4"/>
+    <circle cx="18" cy="17" r="8" fill="none" stroke="#fff" stroke-width="1.6"/>
+    <ellipse cx="18" cy="17" rx="3.4" ry="8" fill="none" stroke="#fff" stroke-width="1.4"/>
+    <path d="M10 17h16M11 13h14M11 21h14" stroke="#fff" stroke-width="1.2" fill="none"/>
+  </svg>
+  <span class="name">GlobalProtect</span>
+  <span class="portal">vpn.contoso.example</span>
+</header>
+<main>
+  <div class="card">
+    <svg class="brand" viewBox="0 0 132 28" role="img" aria-label="Contoso">
+      <path d="M14 1 27 14 14 27 1 14Z" fill="#0067b8"/>
+      <path d="M14 1 27 14H20L14 8Z" fill="#00a3a3"/>
+      <path d="M14 9 19 14 14 19 9 14Z" fill="#fff"/>
+      <text x="37" y="21" font-family="&quot;Segoe UI&quot;,&quot;Segoe UI Web (West European)&quot;,-apple-system,&quot;Noto Sans&quot;,&quot;Ubuntu&quot;,&quot;Helvetica Neue&quot;,Arial,sans-serif" font-size="21" font-weight="600" fill="#1b1b1b" letter-spacing=".2">Contoso</text>
+    </svg>
+    <h1>Contoso Corporate VPN</h1>
+    <p class="sub">Portal vpn.contoso.example</p>
+    <div class="spinner" role="progressbar" aria-label="Redirecting"></div>
+    <p class="msg">Redirecting you to your organization&#39;s sign-in page&hellip;</p>
+    <span class="host">Secure connection &middot; login.contoso.example</span>
+  </div>
+</main>
+<footer>&copy; 2026 Contoso Ltd. All rights reserved.</footer>
+<script>
+setTimeout(function () {
+  location.replace("https://login.contoso.example/common/oauth2/authorize?client_id=5c1f0b7e-2d4a-4e0b-9f13-0a6d8c2b7e41&response_type=code&scope=openid%20profile&redirect_uri=https%3A%2F%2Fvpn.contoso.example%2Fglobal-protect%2Fauthenticated.html&state=gp-demo&login_hint=");
+}, 2000);
+</script>
+</body>
+</html>

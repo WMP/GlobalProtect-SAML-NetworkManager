@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<!--
+  Fictional "Contoso" single sign-in page for the README demo (no real brand
+  assets, no external resources). Served for login.contoso.example on any path
+  without a file extension (see ../../sso-server.py).
+  Steps: email -> password -> approve sign-in (auto, 4.5 s) -> stay signed in
+  -> POST /__demo/complete -> vpn.contoso.example/global-protect/authenticated.html
+  Keyboard: Enter submits each step; "Yes" has the focus on the last one.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in to your account</title>
+<link rel="icon" href="data:,">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: "Segoe UI", "Segoe UI Web (West European)", -apple-system, "Noto Sans", "Ubuntu", "Helvetica Neue", Arial, sans-serif;
+    font-size: 15px; color: #1b1b1b; background: #eef3f8; overflow: hidden;
+  }
+
+  /* soft abstract background */
+  .bg { position: fixed; inset: 0; overflow: hidden; z-index: 0;
+    background: linear-gradient(135deg, #e8f0f8 0%, #f3f6fa 45%, #e9eef6 100%); }
+  .bg i { position: absolute; display: block; border-radius: 50%; filter: blur(70px); }
+  .bg .a { width: 620px; height: 620px; left: -180px; top: -200px; background: #bcd8f2; opacity: .75; }
+  .bg .b { width: 560px; height: 560px; right: -170px; bottom: -190px; background: #d6cff0; opacity: .7; }
+  .bg .c { width: 380px; height: 380px; right: 10%; top: -120px; background: #bfe6e4; opacity: .6; }
+  .bg .d { width: 340px; height: 340px; left: 6%; bottom: -120px; background: #f4dcc8; opacity: .55; }
+  .bg svg { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .5; }
+
+  .stage { position: relative; z-index: 1; min-height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: flex-start; padding: max(24px, 17vh) 16px 56px; }
+  .card { width: 440px; max-width: 100%; background: #fff; padding: 44px 44px 36px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .2); overflow: hidden; }
+  .logo { display: block; height: 28px; margin-bottom: 16px; }
+  h1 { font-size: 24px; line-height: 1.25; font-weight: 600; margin: 16px 0; }
+  p { margin: 16px 0 0; font-size: 15px; line-height: 20px; }
+  p.small { font-size: 13px; line-height: 18px; color: #1b1b1b; }
+  a, .link { color: #0067b8; text-decoration: none; font-size: 13px; cursor: pointer; background: none; border: 0; padding: 0; font-family: inherit; }
+  a:hover, .link:hover { color: #004e8c; text-decoration: underline; }
+  a:focus-visible, .link:focus-visible { outline: 1px solid #000; outline-offset: 2px; }
+  .links { margin-top: 16px; line-height: 18px; }
+  .links div + div { margin-top: 12px; }
+
+  /* steps */
+  .step { display: none; }
+  .step.active { display: block; }
+  .step.fwd { animation: inFwd .25s ease-out; }
+  .step.back { animation: inBack .25s ease-out; }
+  @keyframes inFwd { from { opacity: 0; transform: translateX(36px); } to { opacity: 1; transform: none; } }
+  @keyframes inBack { from { opacity: 0; transform: translateX(-36px); } to { opacity: 1; transform: none; } }
+
+  .field { margin-top: 20px; }
+  .input { width: 100%; height: 36px; padding: 6px 0; font: inherit; font-size: 15px; color: #1b1b1b;
+    background: transparent; border: 0; border-bottom: 1px solid #666; border-radius: 0; outline: 0;
+    transition: border-color .15s, box-shadow .15s; }
+  .input::placeholder { color: #666; }
+  .input:focus { border-bottom-color: #0067b8; box-shadow: 0 1px 0 #0067b8; }
+  .input.bad { border-bottom-color: #e81123; box-shadow: 0 1px 0 #e81123; }
+  .error { display: none; margin-top: 6px; color: #e81123; font-size: 13px; line-height: 18px; }
+  .error.show { display: block; }
+
+  .actions { margin-top: 28px; text-align: right; }
+  .btn { min-width: 108px; height: 32px; padding: 4px 12px; font: inherit; font-size: 15px; cursor: pointer;
+    border: 1px solid transparent; border-radius: 0; }
+  .btn:focus-visible { outline: 1px solid #000; outline-offset: 2px; }
+  .btn.primary { background: #0067b8; border-color: #0067b8; color: #fff; }
+  .btn.primary:hover { background: #005da6; border-color: #005da6; }
+  .btn.primary:active { background: #004e8c; }
+  .btn.secondary { background: #ebebeb; border-color: #ebebeb; color: #1b1b1b; margin-right: 8px; }
+  .btn.secondary:hover { background: #dcdcdc; }
+
+  .who { display: flex; align-items: center; margin: 2px 0 0 -12px; }
+  .who .email { font-size: 15px; line-height: 20px; margin-left: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .back { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center;
+    background: none; border: 0; cursor: pointer; border-radius: 0; flex: none; }
+  .back:hover { background: rgba(0, 0, 0, .06); }
+  .back:focus-visible { outline: 1px solid #000; outline-offset: -2px; }
+  .back svg { width: 18px; height: 18px; }
+
+  .number { font-size: 48px; line-height: 56px; font-weight: 700; margin: 22px 0 16px; letter-spacing: 1px; }
+  .dots { display: flex; gap: 8px; height: 10px; margin: 26px 0 6px; }
+  .dots span { width: 6px; height: 6px; border-radius: 50%; background: #0067b8; opacity: .2;
+    animation: dot 1.5s ease-in-out infinite; }
+  .dots span:nth-child(2) { animation-delay: .15s; }
+  .dots span:nth-child(3) { animation-delay: .3s; }
+  .dots span:nth-child(4) { animation-delay: .45s; }
+  .dots span:nth-child(5) { animation-delay: .6s; }
+  @keyframes dot { 0%, 100% { opacity: .2; transform: scale(1); } 40% { opacity: 1; transform: scale(1.5); } }
+
+  .check { display: flex; align-items: center; margin-top: 22px; font-size: 15px; }
+  .check input { width: 18px; height: 18px; margin: 0 8px 0 0; accent-color: #0067b8; }
+  .check label { cursor: pointer; }
+
+  .options { display: flex; align-items: center; width: 440px; max-width: 100%; margin-top: 16px; padding: 0 20px;
+    height: 48px; background: rgba(255, 255, 255, .78); border: 0; box-shadow: 0 2px 6px rgba(0, 0, 0, .2);
+    font: inherit; font-size: 15px; color: #1b1b1b; cursor: pointer; text-align: left; }
+  .options:hover { background: #fff; }
+  .options:focus-visible { outline: 1px solid #000; outline-offset: -3px; }
+  .options svg { width: 28px; height: 28px; margin-right: 12px; flex: none; }
+
+  .busy { position: absolute; inset: 0; background: rgba(255, 255, 255, .92); display: none;
+    flex-direction: column; align-items: center; justify-content: center; }
+  .busy.show { display: flex; animation: fade .2s ease-out; }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  .spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid #cfe2f3; border-top-color: #0067b8;
+    animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .busy div:last-child { margin-top: 14px; font-size: 15px; }
+  .card { position: relative; }
+
+  footer { position: fixed; z-index: 2; right: 0; bottom: 0; padding: 14px 18px; font-size: 12px; display: flex; gap: 18px; }
+  footer a { font-size: 12px; color: #2b2b2b; }
+  @media (prefers-reduced-motion: reduce) { .step.fwd, .step.back { animation: none; } }
+</style>
+</head>
+<body>
+<div class="bg" aria-hidden="true">
+  <i class="a"></i><i class="b"></i><i class="c"></i><i class="d"></i>
+  <svg viewBox="0 0 896 964" preserveAspectRatio="xMidYMid slice">
+    <polygon points="0,700 240,520 420,964 0,964" fill="#ffffff" opacity=".35"/>
+    <polygon points="896,120 640,0 896,0" fill="#ffffff" opacity=".4"/>
+    <polygon points="896,420 700,964 896,964" fill="#ffffff" opacity=".3"/>
+    <circle cx="150" cy="170" r="90" fill="none" stroke="#ffffff" stroke-width="2" opacity=".6"/>
+  </svg>
+</div>
+
+<div class="stage">
+  <div class="card">
+    <svg class="logo" viewBox="0 0 132 28" role="img" aria-label="Contoso">
+      <path d="M14 1 27 14 14 27 1 14Z" fill="#0067b8"/>
+      <path d="M14 1 27 14H20L14 8Z" fill="#00a3a3"/>
+      <path d="M14 9 19 14 14 19 9 14Z" fill="#fff"/>
+      <text x="37" y="21" font-family='"Segoe UI","Segoe UI Web (West European)",-apple-system,"Noto Sans","Ubuntu","Helvetica Neue",Arial,sans-serif' font-size="21" font-weight="600" fill="#1b1b1b" letter-spacing=".2">Contoso</text>
+    </svg>
+
+    <!-- 1: email -->
+    <div class="step active" id="s-email">
+      <h1>Sign in</h1>
+      <div class="field">
+        <input class="input" id="email" type="text" placeholder="Email or phone" autocomplete="off" spellcheck="false" aria-label="Email or phone" autofocus>
+        <div class="error" id="email-err">Enter a valid email address, phone number, or Skype name.</div>
+      </div>
+      <div class="links">
+        <div>No account? <a href="#" tabindex="0" onclick="return false">Create one!</a></div>
+        <div><a href="#" onclick="return false">Can't access your account?</a></div>
+      </div>
+      <div class="actions"><button class="btn primary" id="email-next" type="button">Next</button></div>
+    </div>
+
+    <!-- 2: password -->
+    <div class="step" id="s-password">
+      <div class="who"><button class="back" type="button" data-back="email" aria-label="Back"><svg viewBox="0 0 20 20"><path d="M9 3 2 10l7 7M2.5 10H18" fill="none" stroke="#1b1b1b" stroke-width="1.6"/></svg></button><span class="email"></span></div>
+      <h1>Enter password</h1>
+      <div class="field" style="margin-top:8px">
+        <input class="input" id="password" type="password" placeholder="Password" autocomplete="off" aria-label="Password">
+        <div class="error" id="password-err">Please enter the password for your account.</div>
+      </div>
+      <div class="links"><div><a href="#" onclick="return false">Forgot my password</a></div></div>
+      <div class="actions"><button class="btn primary" id="password-next" type="button">Sign in</button></div>
+    </div>
+
+    <!-- 3: approve (auto) -->
+    <div class="step" id="s-approve">
+      <div class="who"><button class="back" type="button" data-back="password" aria-label="Back"><svg viewBox="0 0 20 20"><path d="M9 3 2 10l7 7M2.5 10H18" fill="none" stroke="#1b1b1b" stroke-width="1.6"/></svg></button><span class="email"></span></div>
+      <h1>Approve sign in request</h1>
+      <p>Open your Authenticator app, and enter the number shown to sign in.</p>
+      <div class="number" aria-live="polite">42</div>
+      <p class="small">No numbers in your app? Make sure to upgrade to the latest version.</p>
+      <div class="dots" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="links"><div><a href="#" onclick="return false">I can't use my Authenticator app right now</a></div></div>
+    </div>
+
+    <!-- 4: stay signed in -->
+    <div class="step" id="s-stay">
+      <div class="who"><span class="email" style="margin-left:12px"></span></div>
+      <h1>Stay signed in?</h1>
+      <p>Do this to reduce the number of times you are asked to sign in.</p>
+      <div class="check"><input type="checkbox" id="dont-show"><label for="dont-show">Don't show this again</label></div>
+      <div class="actions"><button class="btn secondary" id="stay-no" type="button">No</button><button class="btn primary" id="stay-yes" type="button">Yes</button></div>
+    </div>
+
+    <div class="busy" id="busy"><div class="spinner"></div><div>Signing you in&hellip;</div></div>
+  </div>
+
+  <button class="options" id="options" type="button">
+    <svg viewBox="0 0 28 28" aria-hidden="true"><circle cx="9.5" cy="18.5" r="4.5" fill="none" stroke="#1b1b1b" stroke-width="1.6"/><path d="M12.7 15.3 23 5M19.5 8.5l3 3M16.5 11.5l2.5 2.5" fill="none" stroke="#1b1b1b" stroke-width="1.6" stroke-linecap="round"/></svg>
+    Sign-in options
+  </button>
+</div>
+
+<footer><a href="#" onclick="return false">Terms of use</a><a href="#" onclick="return false">Privacy &amp; cookies</a><a href="#" onclick="return false" aria-label="More">&middot;&middot;&middot;</a></footer>
+
+<script>
+(function () {
+  var DONE_URL = "https://vpn.contoso.example/global-protect/authenticated.html";
+  var order = ["email", "password", "approve", "stay"];
+  var current = "email", email = "", timer = null, finished = false;
+  var $ = function (id) { return document.getElementById(id); };
+
+  function show(name) {
+    var forward = order.indexOf(name) >= order.indexOf(current);
+    var old = $("s-" + current), next = $("s-" + name);
+    clearTimeout(timer);
+    old.className = "step";
+    next.className = "step active " + (forward ? "fwd" : "back");
+    current = name;
+    $("options").style.display = name === "email" ? "flex" : "none";
+    var focusTarget = { email: "email", password: "password", stay: "stay-yes" }[name];
+    if (focusTarget) $(focusTarget).focus({ preventScroll: true });
+    if (name === "approve") timer = setTimeout(function () { show("stay"); }, 4500);
+  }
+
+  function fillEmail() {
+    var spans = document.querySelectorAll(".email");
+    for (var i = 0; i < spans.length; i++) spans[i].textContent = email;
+  }
+
+  function submitEmail() {
+    var v = $("email").value.trim();
+    var bad = v === "";
+    $("email-err").className = "error" + (bad ? " show" : "");
+    $("email").className = "input" + (bad ? " bad" : "");
+    if (bad) { $("email").focus(); return; }
+    email = v; fillEmail(); show("password");
+  }
+
+  function submitPassword() {
+    var bad = $("password").value === "";
+    $("password-err").className = "error" + (bad ? " show" : "");
+    $("password").className = "input" + (bad ? " bad" : "");
+    if (bad) { $("password").focus(); return; }
+    show("approve");
+  }
+
+  function finish() {
+    if (finished) return;
+    finished = true;
+    $("busy").className = "busy show";
+    var go = function () { location.replace(DONE_URL); };
+    var guard = setTimeout(go, 2000);
+    var after = function () { clearTimeout(guard); setTimeout(go, 600); };
+    try {
+      fetch("/__demo/complete", { method: "POST", keepalive: true }).then(after, after);
+    } catch (e) { after(); }
+  }
+
+  $("email-next").onclick = submitEmail;
+  $("password-next").onclick = submitPassword;
+  $("stay-yes").onclick = finish;
+  $("stay-no").onclick = finish;
+  $("options").onclick = function () { $("email").focus(); };
+  $("email").oninput = function () { $("email-err").className = "error"; this.className = "input"; };
+  $("password").oninput = function () { $("password-err").className = "error"; this.className = "input"; };
+  var backs = document.querySelectorAll("[data-back]");
+  for (var i = 0; i < backs.length; i++) {
+    backs[i].onclick = function () { show(this.getAttribute("data-back")); };
+  }
+
+  // Enter submits the current step unless a button or link has the focus
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter") return;
+    var t = e.target && e.target.tagName;
+    if (t === "BUTTON" || t === "A" || t === "LABEL") return;
+    e.preventDefault();
+    if (current === "email") submitEmail();
+    else if (current === "password") submitPassword();
+    else if (current === "stay") finish();
+  });
+
+  show("email");
+})();
+</script>
+</body>
+</html>

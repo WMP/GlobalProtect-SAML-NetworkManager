@@ -1,0 +1,13 @@
+#!/bin/bash
+# Shim for the README demo container (installed as /usr/local/bin/loginctl).
+# The container has no systemd-logind, but nm-gpclient-service.py asks
+# `loginctl list-users --no-legend` to find the desktop user. Report the user
+# with uid 1000, as logind would for a logged-in session. Everything else is
+# a silent no-op.
+
+if [ "$1" = "list-users" ]; then
+    entry=$(getent passwd 1000) || exit 0
+    IFS=: read -r name _ uid _ <<< "$entry"
+    echo "$uid $name"
+fi
+exit 0
