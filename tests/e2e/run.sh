@@ -25,7 +25,7 @@
 #   DEMO_TIMEOUT_SCALE multiplies all timeouts of the scenarios (default 1)
 #   GIF_CROP         crop box w:h:x:y of the recording for the GIF
 #   GIF_TRIM_START   seconds to cut from the start of the GIF recording
-#   GIF_FPS          GIF frame rate (default 12)
+#   GIF_FPS          GIF frame rate (default 10)
 #   SCREEN_W, SCREEN_H  size of the virtual screen (default 1280x800); the GIF
 #                    has the same size (no scaling)
 #   SKIP_BUILD=1     use the images that exist (CI builds them with buildx)
@@ -83,7 +83,7 @@ build_image() {
 
 make_gif() {
     local name="$1" outdir="$2" gif="$repo/docs/images/$(gif_of "$1")" tmpgif pal
-    local fps="${GIF_FPS:-12}" trim="${GIF_TRIM_START:-}" end="" filters
+    local fps="${GIF_FPS:-10}" trim="${GIF_TRIM_START:-}" end="" filters
     if [ -z "$trim" ]; then
         trim=0
         [ -s "$outdir/trim-start" ] && trim="$(cat "$outdir/trim-start")"

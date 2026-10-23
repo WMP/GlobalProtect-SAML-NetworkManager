@@ -175,6 +175,20 @@ animate_window() {
 
 EDGE_COUNT=0
 
+# The browser wrapper starts Edge with --window-size=896,964, which is taller
+# than the screen. Resize it to fit between the top bar and the bottom edge
+# (the panel of KDE) and center it: edge_fit <window id>. KWin keeps the window
+# inside the work area whatever the size. The scenario sets EDGE_LEFT (width of the dock, 0 without) and EDGE_TOP (top bar height).
+EDGE_W=896
+EDGE_H=$((SCREEN_H - 100))
+edge_fit() {
+    local x y
+    x=$(((SCREEN_W + ${EDGE_LEFT:-0} - EDGE_W) / 2))
+    y=${EDGE_TOP:-0}
+    xdotool windowsize "$1" "$EDGE_W" "$EDGE_H"
+    xdotool windowmove "$1" "$x" "$y"
+}
+
 # The Edge sign-in of the demo (the same in both desktops). Set EDGE_DX and
 # EDGE_DY first: the offset of the page content from the window box (win_box).
 # Types the email and password, waits for the number-match page, clicks "Yes"
@@ -182,9 +196,9 @@ EDGE_COUNT=0
 edge_signin() {
     local win
     # The window opens on the portal page ("GlobalProtect Portal"); Edge places
-    # it where it likes, so move it to the middle of the desktop right away
+    # it where it likes, so fit it to the screen right away
     win=$(wait_for_window "Sign in|GlobalProtect Portal" 60) || fail "the Edge sign-in window did not open"
-    [ -n "${EDGE_POS:-}" ] && xdotool windowmove "$win" ${EDGE_POS}
+    edge_fit "$win"
     wait_for_window "Sign in" 30 > /dev/null || fail "the sign-in page did not load"
     pause 1.0
     win_box "$win" || fail "cannot read the Edge window geometry"
@@ -205,7 +219,7 @@ edge_signin() {
     pause 4.5
     pause 0.8
     shot step-edge-4-stay
-    click $((WX + EDGE_DX + 569)) $((WY + EDGE_DY + 460)) 0.6
+    click $((WX + EDGE_DX + 569)) $((WY + EDGE_DY + 415)) 0.6
     pause 1.0
     shot step-edge-5-done
     wait_window_gone "Sign in|GlobalProtect Portal" 30 || fail "the Edge window did not close by itself"
@@ -223,7 +237,7 @@ mark_start() {
 edge_sso_auto() {
     local win
     win=$(wait_for_window "Sign in|GlobalProtect Portal" 60) || fail "the Edge sign-in window did not open"
-    [ -n "${EDGE_POS:-}" ] && xdotool windowmove "$win" ${EDGE_POS}
+    edge_fit "$win"
     shot step-edge-auto
     snapshot "edge-open-$((++EDGE_COUNT))"
     wait_window_gone "Sign in|GlobalProtect Portal" 30 || fail "the Edge window did not close by itself"

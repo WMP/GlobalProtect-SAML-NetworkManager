@@ -29,7 +29,7 @@ gnome)
         uuid=$(gsettings get org.gnome.Terminal.ProfilesList default | tr -d "\047")
         profile="org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$uuid/"
         gsettings set "$profile" use-system-font false
-        gsettings set "$profile" font "Ubuntu Mono 18"
+        gsettings set "$profile" font "Ubuntu Mono 16"
         gsettings set "$profile" default-size-columns 80
         gsettings set "$profile" default-size-rows 24
         gsettings set "$profile" audible-bell false

@@ -78,7 +78,8 @@ DNS at each step), `NetworkManager.log` (it has the service log),
 | `E2E_OUT_DIR` | Output directory (default `tests/e2e/out`). |
 | `E2E_SCENARIO_FILE` | Scenario file to run instead of the one in the image. |
 | `DEMO_TIMEOUT_SCALE` | Multiplies all timeouts of the scenarios. |
-| `GIF_CROP`, `GIF_TRIM_START`, `GIF_FPS` | Crop box `w:h:x:y`, seconds to cut from the start, frame rate (default 12) of the GIF. |
+| `GIF_CROP`, `GIF_TRIM_START`, `GIF_FPS` | Crop box `w:h:x:y`, seconds to cut from the start, frame rate (default 10) of the GIF. |
+| `SCREEN_W`, `SCREEN_H` | Size of the virtual screen (default 1280x800). Set in `run.sh` only and passed to the container. The GIF has the same size (no scaling). |
 | `SKIP_BUILD=1` | Use the images that exist (CI builds them with buildx). |
 
 GitHub: the workflow `e2e.yml` runs by hand (Actions tab, inputs `scenario` and
@@ -89,7 +90,7 @@ table of checks. It uses no secrets.
 ## Write or change a scenario
 
 Scenarios (`scenario-<name>.sh`) run as the desktop user `demo` on
-`DISPLAY=:1` (1920x1080) and source `lib.sh` (`wait_for_window`, `smooth_move`,
+`DISPLAY=:1` (1280x800, set by `SCREEN_W` and `SCREEN_H`) and source `lib.sh` (`wait_for_window`, `smooth_move`,
 `click`, `type_slow`, `key`, `window_geometry`, `win_box`, `screenshot`, `shot`,
 `snapshot`, `pause`, `edge_signin`, ...). Rules:
 
@@ -97,7 +98,10 @@ Scenarios (`scenario-<name>.sh`) run as the desktop user `demo` on
   in `scenario.log`, `failure.png` shows the screen, and no GIF is made.
 - `snapshot <name>` saves the state the checks read (`state-<name>.txt`); the
   names a scenario saves are listed in `SCENARIO_STATES` of `checks.py`.
-- Use coordinates from window geometry (`win_box`), not from the screen.
+- Use coordinates from window geometry (`win_box`) or from `SCREEN_W` and
+  `SCREEN_H`, never absolute numbers. Edge is started with a window taller than
+  the screen: call `edge_fit` (done by `edge_signin`) so that the whole window
+  is visible.
 - For a GIF: `mark_start` cuts the setup before it, `mark_end` cuts the
   disconnect after it.
 

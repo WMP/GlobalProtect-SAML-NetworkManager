@@ -4,7 +4,8 @@
 source /opt/gp-demo/lib.sh
 EDGE_DX=${EDGE_DX:-0}
 EDGE_DY=${EDGE_DY:-0}
-EDGE_POS="545 91"
+EDGE_LEFT=66 # the dock
+EDGE_TOP=40  # the top bar
 
 pause 1.5
 shot step-01-desktop
@@ -19,7 +20,7 @@ SX=$((WX + 61)); SY=$((WY + 55))
 shot step-02-settings
 
 # 2. "+" next to VPN, then GlobalProtect in the list
-click $((SX + 942)) $((SY + 111))
+click $((SX + 889)) $((SY + 111))
 dlg=$(wait_for_window "^Add VPN$" 20) || fail "the Add VPN dialog did not open"
 pause 1.0
 win_box "$dlg" || fail "cannot read the dialog geometry"
@@ -31,7 +32,7 @@ pause 1.0
 # 3. Our editor: Identity tab, in a dialog made big enough for the form
 click $((DX + 123)) $((DY + 64))
 pause 0.5
-animate_window "$dlg" 900 740 510 170
+animate_window "$dlg" 880 700 $(((SCREEN_W + 66 - 880) / 2)) $((32 + (SCREEN_H - 32 - 700) / 2))
 pause 0.8
 win_box "$dlg" || fail "cannot read the dialog geometry"
 DX=$((WX + 61)); DY=$((WY + 55)); DW=$((WW - 122))
@@ -58,7 +59,7 @@ pause 1.2
 shot step-07-vpn-added
 
 # 4. Connect with the switch of the new row; Edge opens through the wrapper
-click_until_window $((SX + 881)) $((SY + 160)) "Sign in|GlobalProtect Portal" || fail "the switch did not start the sign-in"
+click_until_window $((SX + 828)) $((SY + 160)) "Sign in|GlobalProtect Portal" || fail "the switch did not start the sign-in"
 edge_signin
 wait_vpn "Contoso VPN" activated 60 || fail "the VPN did not become active"
 pause 1.5
@@ -66,10 +67,10 @@ shot step-08-connected
 snapshot connected
 
 # 5. Close Settings, show the VPN in the quick settings
-click $((SX + 1057)) $((SY + 23))
+click $((SX + 977)) $((SY + 23))
 wait_window_gone "^Settings$" 10 || fail "Settings did not close"
 pause 1.0
-click 1867 15
+click $((SCREEN_W - 53)) 15
 pause 1.0
 shot step-09-quick-settings
 pause 2.5

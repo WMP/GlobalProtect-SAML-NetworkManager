@@ -5,7 +5,8 @@
 # gives up after GP_DEMO_AUTH_TIMEOUT seconds (run.sh sets 15).
 # Not recorded for a GIF. Runs as user demo; see lib.sh.
 source /opt/gp-demo/lib.sh
-EDGE_POS="545 91"
+EDGE_LEFT=66 # the dock
+EDGE_TOP=40  # the top bar
 
 nmcli connection add type vpn vpn-type gpclient con-name "Contoso VPN" \
     vpn.data "gateway=vpn.contoso.example,browser=edge" > /dev/null || fail "cannot add the VPN profile"
@@ -15,7 +16,7 @@ snapshot before
 nmcli connection up "Contoso VPN" > "$DEMO_OUT/nmcli-up.log" 2>&1 &
 UP_PID=$!
 win=$(wait_for_window "Sign in|GlobalProtect Portal" 60) || fail "the Edge sign-in window did not open"
-xdotool windowmove "$win" ${EDGE_POS}
+edge_fit "$win"
 wait_for_window "Sign in" 30 > /dev/null || fail "the sign-in page did not load"
 pause 1.5
 shot step-1-signin

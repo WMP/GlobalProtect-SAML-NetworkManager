@@ -6,7 +6,8 @@
 source /opt/gp-demo/lib.sh
 EDGE_DX=0
 EDGE_DY=0
-EDGE_POS="545 91"
+EDGE_LEFT=66 # the dock
+EDGE_TOP=40  # the top bar
 
 say() { type_slow "# $1" 45; key Return; pause 0.4; }
 run() { type_slow "$1" 50; pause 0.3; key Return; pause 0.4; }
@@ -23,9 +24,9 @@ show_routing() {
 
 # Connect or disconnect with the VPN tile of the quick settings
 quick_vpn() {
-    click 1867 15
+    click $((SCREEN_W - 53)) 15
     pause 1.0
-    click 1600 130
+    click $((SCREEN_W - 320)) 130
     pause 0.8
 }
 
@@ -44,7 +45,7 @@ for _ in $(seq 40); do
     sleep 0.5
 done
 pause 1.0
-xdotool mousemove 1100 600
+xdotool mousemove $((SCREEN_W * 4 / 5)) $((SCREEN_H * 3 / 4))
 mark_start
 
 # --- 1. Before connecting ---------------------------------------------------
@@ -54,6 +55,7 @@ term=$(wait_for_window "^demo@" 20) || fail "the terminal did not open"
 pause 1.2
 win_box "$term" || fail "cannot read the terminal geometry"
 TX=$((WX + WW / 2)); TY=$((WY + WH / 2))
+smooth_move "$TX" "$TY" 0.4 # away from the tooltip of the dock
 shot step-01-terminal
 snapshot before
 say "Before connecting: all traffic uses the wired link"
@@ -90,7 +92,7 @@ pause 1.0
 win_box "$win" || fail "cannot read the Settings geometry"
 SX=$((WX + 61)); SY=$((WY + 55))
 shot step-03-settings
-click $((SX + 929)) $((SY + 160))
+click $((SX + 876)) $((SY + 160))
 dlg=$(wait_for_window "^Contoso VPN$" 20) || fail "the VPN dialog did not open"
 pause 1.0
 win_box "$dlg" || fail "cannot read the dialog geometry"
@@ -104,7 +106,7 @@ shot step-05-checkbox
 click $((DX + 711)) $((DY + 23))
 wait_window_gone "^Contoso VPN$" 20 || fail "the VPN dialog did not close"
 pause 1.0
-click $((SX + 1057)) $((SY + 23))
+click $((SX + 977)) $((SY + 23))
 wait_window_gone "^Settings$" 10 || fail "Settings did not close"
 pause 1.0
 
