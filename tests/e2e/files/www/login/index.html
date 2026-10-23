@@ -214,12 +214,14 @@
   var current = "email", email = "", timer = null, finished = false;
   var $ = function (id) { return document.getElementById(id); };
 
-  function show(name) {
+  // `first`: the first view of the page appears without the slide, as on the
+  // real page (sliding in on the first paint also left the card half drawn)
+  function show(name, first) {
     var forward = order.indexOf(name) >= order.indexOf(current);
     var old = $("s-" + current), next = $("s-" + name);
     clearTimeout(timer);
     old.className = "step";
-    next.className = "step active " + (forward ? "fwd" : "back");
+    next.className = "step active" + (first ? "" : forward ? " fwd" : " back");
     current = name;
     $("options").style.display = name === "email" ? "flex" : "none";
     var focusTarget = { email: "email", password: "password", stay: "stay-yes" }[name];
@@ -295,10 +297,10 @@
     // Signed in before: the account is known, so sign in by itself
     email = known;
     fillEmail();
-    show("tile");
+    show("tile", true);
     setTimeout(finish, 1500);
   } else {
-    show("email");
+    show("email", true);
   }
 })();
 </script>
