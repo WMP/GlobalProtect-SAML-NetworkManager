@@ -26,12 +26,18 @@
 #   GIF_CROP         crop box w:h:x:y of the recording for the GIF
 #   GIF_TRIM_START   seconds to cut from the start of the GIF recording
 #   GIF_FPS          GIF frame rate (default 12)
+#   SCREEN_W, SCREEN_H  size of the virtual screen (default 1280x800); the GIF
+#                    has the same size (no scaling)
 #   SKIP_BUILD=1     use the images that exist (CI builds them with buildx)
 set -uo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 out_base="${E2E_OUT_DIR:-$here/out}"
+# The size of the virtual screen: the only place with the numbers; the
+# container gets them as environment (start.sh, lib.sh)
+SCREEN_W="${SCREEN_W:-1280}"
+SCREEN_H="${SCREEN_H:-800}"
 
 usage() { sed -n '2,/^set -u/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
 
@@ -85,7 +91,7 @@ make_gif() {
     [ -s "$outdir/trim-end" ] && end="$(cat "$outdir/trim-end")"
     filters="fps=$fps,"
     [ -n "${GIF_CROP:-}" ] && filters+="crop=$GIF_CROP,"
-    filters+="scale=1280:-1:flags=lanczos"
+    filters="${filters%,}"
     mkdir -p "$(dirname "$gif")"
     pal="$(mktemp --suffix=.png)"
     tmpgif="$(mktemp --suffix=.gif)"
@@ -132,7 +138,7 @@ for name in "${targets[@]}"; do
         build_image "$image" || { echo "build of the $image image failed" >&2; failed+=("$name"); continue; }
     fi
     run=(docker run --rm --privileged --network none --hostname demo-laptop
-        -e "E2E_SCENARIO=$name" -e "DEMO_TIMEOUT_SCALE=${DEMO_TIMEOUT_SCALE:-1}"
+        -e "E2E_SCENARIO=$name" -e "SCREEN_W=$SCREEN_W" -e "SCREEN_H=$SCREEN_H" -e "DEMO_TIMEOUT_SCALE=${DEMO_TIMEOUT_SCALE:-1}"
         $(env_of "$name") -v "$outdir:/out")
     if [ -n "${E2E_SCENARIO_FILE:-}" ]; then
         run+=(-e E2E_SCENARIO_FILE=/opt/gp-demo/override.sh -v "$(readlink -f "$E2E_SCENARIO_FILE"):/opt/gp-demo/override.sh:ro")

@@ -9,12 +9,15 @@
 #
 # Environment: E2E_SCENARIO (name of /opt/gp-demo/scenarios/scenario-<name>.sh,
 # default: the desktop), E2E_SCENARIO_FILE (a file to run instead),
-# GP_DEMO_AUTH_TIMEOUT (seconds the fake gpauth waits for the sign-in).
+# GP_DEMO_AUTH_TIMEOUT (seconds the fake gpauth waits for the sign-in),
+# SCREEN_W and SCREEN_H (size of the screen, set by run.sh).
 # Output goes to /out: raw.mp4, logs, screenshots, state-*.txt, results.json.
 # The exit code is not zero if the scenario or a check fails.
 set -u
 
 DE="${1:?usage: $0 <gnome|kde>}"
+: "${SCREEN_W:?SCREEN_W is not set (run.sh sets it)}" "${SCREEN_H:?SCREEN_H is not set (run.sh sets it)}"
+export SCREEN_W SCREEN_H
 OUT=/out
 DEMO_UID=1000
 mkdir -p "$OUT" /run/gp-demo
@@ -79,7 +82,7 @@ log "display and desktop ($DE)"
 install -d -o demo -g demo -m 700 /run/user/$DEMO_UID
 as_demo() { runuser -u demo -- env HOME=/home/demo USER=demo LOGNAME=demo DISPLAY=:1 \
     XDG_RUNTIME_DIR=/run/user/$DEMO_UID PATH="$PATH" "$@"; }
-as_demo Xvfb :1 -screen 0 1920x1080x24 +extension GLX > "$OUT/xvfb.log" 2>&1 &
+as_demo Xvfb :1 -screen 0 ${SCREEN_W}x${SCREEN_H}x24 +extension GLX > "$OUT/xvfb.log" 2>&1 &
 for _ in $(seq 60); do [ -S /tmp/.X11-unix/X1 ] && as_demo xdpyinfo > /dev/null 2>&1 && break; sleep 0.5; done
 as_demo /opt/gp-demo/session/desktop.sh "$DE" > "$OUT/desktop.log" 2>&1 &
 
@@ -99,17 +102,17 @@ SCENARIO="${E2E_SCENARIO_FILE:-/opt/gp-demo/scenarios/scenario-${E2E_SCENARIO:-$
 log "scenario: $SCENARIO"
 if [ "$DE" = gnome ]; then
     # Close the "Screen Lock disabled" banner gnome-shell shows (no GDM here)
-    as_demo xdotool mousemove 1216 57 click 1
+    as_demo xdotool mousemove $((SCREEN_W / 2 + 256)) 57 click 1
     sleep 1
 fi
-as_demo bash -c "xdotool mousemove 960 540"
-as_demo ffmpeg -nostdin -y -f x11grab -framerate 25 -video_size 1920x1080 -i :1 \
+as_demo bash -c "xdotool mousemove $((SCREEN_W / 2)) $((SCREEN_H / 2))"
+as_demo ffmpeg -nostdin -y -f x11grab -framerate 25 -video_size ${SCREEN_W}x${SCREEN_H} -i :1 \
     -c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p /tmp/raw.mp4 > "$OUT/ffmpeg.log" 2>&1 &
 FFMPEG_PID=$!
 sleep 1
 date +%s.%N > /tmp/recording-start
 log "scenario start"
-as_demo env DEMO_OUT="$OUT" DEMO_DE="$DE" bash "$SCENARIO" > "$OUT/scenario.log" 2>&1
+as_demo env SCREEN_W="$SCREEN_W" SCREEN_H="$SCREEN_H" DEMO_OUT="$OUT" DEMO_DE="$DE" bash "$SCENARIO" > "$OUT/scenario.log" 2>&1
 STATUS=$?
 echo "$STATUS" > "$OUT/scenario.exit"
 log "scenario end (exit $STATUS)"

@@ -21,16 +21,16 @@ gnome)
         gsettings set org.gnome.shell welcome-dialog-last-shown-version "999"
         gsettings set org.gnome.mutter center-new-windows true
         gsettings set org.gnome.Settings last-panel network
-        gsettings set org.gnome.Settings window-state "(1080, 760, false)"
+        gsettings set org.gnome.Settings window-state "(1000, 680, false)"
         gsettings set org.gnome.Settings show-development-warning false
         gsettings set org.gnome.shell favorite-apps \
             "[\"microsoft-edge.desktop\", \"org.gnome.Nautilus.desktop\", \"org.gnome.Settings.desktop\", \"org.gnome.Terminal.desktop\"]"
-        # Terminal: large font (readable in a GIF 1280 px wide), 88x24
+        # Terminal: large font (readable in the GIF, which is not scaled), 80x24
         uuid=$(gsettings get org.gnome.Terminal.ProfilesList default | tr -d "\047")
         profile="org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$uuid/"
         gsettings set "$profile" use-system-font false
-        gsettings set "$profile" font "Ubuntu Mono 24"
-        gsettings set "$profile" default-size-columns 88
+        gsettings set "$profile" font "Ubuntu Mono 18"
+        gsettings set "$profile" default-size-columns 80
         gsettings set "$profile" default-size-rows 24
         gsettings set "$profile" audible-bell false
         /usr/libexec/gsd-xsettings &

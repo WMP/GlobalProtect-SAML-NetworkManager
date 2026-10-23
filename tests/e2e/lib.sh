@@ -23,6 +23,8 @@
 
 export DISPLAY="${DISPLAY:-:1}"
 DEMO_OUT="${DEMO_OUT:-/out}"
+# Size of the screen: set by run.sh and passed in by start.sh
+: "${SCREEN_W:?}" "${SCREEN_H:?}"
 
 pause() { sleep "${1:-1}"; }
 
@@ -155,7 +157,7 @@ type_slow() { xdotool type --delay "${2:-70}" -- "$1"; }
 key() { xdotool key --delay 80 "$@"; }
 
 screenshot() {
-    ffmpeg -nostdin -y -loglevel error -f x11grab -video_size 1920x1080 -i "$DISPLAY" \
+    ffmpeg -nostdin -y -loglevel error -f x11grab -video_size "${SCREEN_W}x${SCREEN_H}" -i "$DISPLAY" \
         -frames:v 1 "$1"
 }
 
