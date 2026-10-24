@@ -19,6 +19,9 @@ the Release file, is a fake, and the repository is not signed. Every positive te
 counterpart: a package that names no known release, or has an architecture the repository does
 not serve, stops the script and builds no repository.
 
+Versions kept: only the newest APT_KEEP_VERSIONS (default 2) versions of each package per suite and
+architecture are published, ordered by Debian version rules; a bad value stops the script.
+
 Run with: make test-unit  (or: python3 -m pytest tests/unit -v)
 """
 
@@ -698,3 +701,160 @@ class TestRepositoryUrl:
 
         assert result.returncode == 0, result.stderr + result.stdout
         assert f"Changelogs: {url}/changelogs/@CHANGEPATH@_changelog" in (repo.out / "dists/noble/Release").read_text().splitlines()
+
+
+class TestKeepNewestVersions:
+    def versions(self, repo, suite="noble", arch="amd64", package=CORE):
+        """Versions of a package in the Packages index"""
+        found = []
+        for stanza in repo.index(suite, arch).split("\n\n"):
+            fields = dict(line.split(": ", 1) for line in stanza.splitlines() if ": " in line)
+            if fields.get("Package") == package:
+                found.append(fields["Version"])
+        return sorted(found)
+
+    def pooled(self, repo, suite="noble", package=CORE):
+        return [n for n in repo.pool(suite) if n.startswith(package + "_")]
+
+    def test_by_default_only_the_newest_two_versions_are_published(self, repo):
+        for version in ("1.3.0-1~noble1", "1.4.0-1~noble1", "1.5.0-1~noble1"):
+            repo.add(CORE, version, changelog=version + "\n")
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert self.versions(repo) == ["1.4.0-1~noble1", "1.5.0-1~noble1"]
+        assert self.pooled(repo) == [f"{CORE}_1.4.0-1~noble1_amd64.deb", f"{CORE}_1.5.0-1~noble1_amd64.deb"]
+        assert f"dropping {CORE}_1.3.0-1~noble1_amd64.deb" in result.stdout
+        assert "dropping" not in result.stdout.replace(f"dropping {CORE}_1.3.0-1~noble1_amd64.deb", "")
+
+    def test_the_dropped_version_has_no_changelog(self, repo):
+        for version in ("1.3.0-1~noble1", "1.4.0-1~noble1", "1.5.0-1~noble1"):
+            repo.add(CORE, version, changelog=version + "\n")
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert TestChangelogs.changelogs(None, repo) == [
+            f"main/n/{CORE}/{CORE}_1.4.0-1~noble1_changelog",
+            f"main/n/{CORE}/{CORE}_1.5.0-1~noble1_changelog",
+        ]
+
+    def test_a_suite_with_only_a_dropped_changelog_gets_no_field(self, repo):
+        # the old one has a changelog, the two newest have none: nothing may announce it
+        repo.add(CORE, "1.3.0-1~noble1", changelog="old\n")
+        repo.add(CORE, "1.4.0-1~noble1")
+        repo.add(CORE, "1.5.0-1~noble1")
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert not (repo.out / "changelogs").exists()
+        assert "Changelogs:" not in (repo.out / "dists/noble/Release").read_text()
+
+    def test_fewer_versions_than_the_limit_are_all_kept(self, repo):
+        repo.add(CORE, "1.5.0-1~noble1")
+
+        result = repo.build(env={"APT_KEEP_VERSIONS": "5"})
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert self.versions(repo) == ["1.5.0-1~noble1"]
+        assert "dropping" not in result.stdout
+
+    def test_a_limit_of_one_keeps_only_the_newest(self, repo):
+        for version in ("1.3.0-1~noble1", "1.5.0-1~noble1", "1.4.0-1~noble1"):
+            repo.add(CORE, version)
+
+        result = repo.build(env={"APT_KEEP_VERSIONS": "1"})
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert self.versions(repo) == ["1.5.0-1~noble1"]
+        assert self.pooled(repo) == [f"{CORE}_1.5.0-1~noble1_amd64.deb"]
+
+    def test_a_large_limit_keeps_everything(self, repo):
+        for version in ("1.3.0-1~noble1", "1.4.0-1~noble1", "1.5.0-1~noble1"):
+            repo.add(CORE, version)
+
+        result = repo.build(env={"APT_KEEP_VERSIONS": "9999"})
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert len(self.versions(repo)) == 3
+
+    @pytest.mark.parametrize("versions, newest", [
+        (["1.8.0-1~noble1", "1.9.0-1~noble1", "1.10.0-1~noble1"], ["1.10.0-1~noble1"]),                            # numeric, not alphabetic
+        (["1.5.0-1~noble1", "1.5.0-1~noble2"], ["1.5.0-1~noble2"]),
+        (["2.0-1~noble1", "1:1.0-1~noble1", "1.0-1~noble1"], ["1:1.0-1~noble1"]),  # epoch wins
+        (["1.5.0~rc1-1~noble1", "1.5.0-1~noble1"], ["1.5.0-1~noble1"]),        # tilde sorts before
+        (["1.5.0-1~noble1", "1.5.0-2~noble1"], ["1.5.0-2~noble1"]),
+    ])
+    def test_versions_are_ordered_like_dpkg_does(self, repo, versions, newest):
+        for version in versions:
+            repo.add(CORE, version)
+
+        result = repo.build(env={"APT_KEEP_VERSIONS": "1"})
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert self.versions(repo) == newest
+
+    def test_the_order_does_not_depend_on_the_file_names(self, repo):
+        # the glob order is 1.10.0, 1.9.0 (alphabetical); the kept one is the newest by version
+        repo.add(CORE, "1.9.0-1~noble1")
+        repo.add(CORE, "1.10.0-1~noble1")
+
+        result = repo.build(env={"APT_KEEP_VERSIONS": "1"})
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert self.versions(repo) == ["1.10.0-1~noble1"]
+
+    def test_suites_architectures_and_packages_are_counted_separately(self, repo):
+        for suite in ("noble", "resolute"):
+            for arch in ("amd64", "arm64"):
+                for package in (CORE, CORE + "-gnome"):
+                    for n in (1, 2, 3):
+                        repo.add(package, f"1.{n}.0-1~{suite}1", arch)
+        for n in (1, 2, 3):
+            repo.add(CORE + "-data", f"1.{n}.0-1~noble1", "all")
+
+        result = repo.build()
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        for suite in ("noble", "resolute"):
+            for arch in ("amd64", "arm64"):
+                for package in (CORE, CORE + "-gnome"):
+                    assert self.versions(repo, suite, arch, package) == [
+                        f"1.2.0-1~{suite}1", f"1.3.0-1~{suite}1"], (suite, arch, package)
+        # an Architecture: all package is one group and is listed in every arch index
+        for arch in ("amd64", "arm64"):
+            assert self.versions(repo, "noble", arch, CORE + "-data") == ["1.2.0-1~noble1", "1.3.0-1~noble1"]
+        assert len(self.pooled(repo, "noble", CORE + "-data")) == 2
+        assert len(self.pooled(repo, "noble", CORE)) == 4
+        assert len(self.pooled(repo, "resolute", CORE + "-gnome")) == 4
+
+    def test_the_other_architecture_does_not_count_against_the_limit(self, repo):
+        repo.add(CORE, "1.4.0-1~noble1", "arm64")
+        repo.add(CORE, "1.5.0-1~noble1", "amd64")
+
+        result = repo.build(env={"APT_KEEP_VERSIONS": "1"})
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert self.versions(repo, "noble", "arm64") == ["1.4.0-1~noble1"]
+        assert self.versions(repo, "noble", "amd64") == ["1.5.0-1~noble1"]
+
+    @pytest.mark.parametrize("value", ["0", "-1", "abc", "", "10000", "2x", "x2", "02", "1.5", " 2", "2 ", "2\n", "+2"])
+    def test_a_limit_that_is_not_a_number_from_1_to_9999_stops_the_script(self, repo, value):
+        repo.add(CORE, "1.5.0-1~noble1")
+
+        result = repo.build(env={"APT_KEEP_VERSIONS": value})
+
+        assert result.returncode != 0
+        assert "ERROR: APT_KEEP_VERSIONS must be a number from 1 to 9999" in result.stderr
+        assert not (repo.out / "dists").exists()
+        assert not (repo.out / "pool").exists()
+
+    @pytest.mark.parametrize("value", ["1", "2", "10", "9999"])
+    def test_a_limit_from_1_to_9999_is_accepted(self, repo, value):
+        repo.add(CORE, "1.5.0-1~noble1")
+
+        result = repo.build(env={"APT_KEEP_VERSIONS": value})
+
+        assert result.returncode == 0, result.stderr + result.stdout

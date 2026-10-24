@@ -23,6 +23,16 @@
 #       taken from changelog.Debian.gz, or changelog.gz in a native package
 #   gpclient-archive-keyring.gpg, index.html, .nojekyll
 #
+# The repository does not grow forever (GitHub Pages is limited to 1 GB): per
+# suite, architecture and binary package only the newest APT_KEEP_VERSIONS
+# versions are published (default 2: the current one and the previous one, to go
+# back to), ordered like dpkg orders versions (epoch, tilde and all). Packages of
+# Architecture: all are a group of their own. The older .deb files are logged and
+# left out of the pool, the indexes and the changelogs; they stay as assets of
+# their GitHub release.
+#
+# Environment: APT_REPO_URL (see above), APT_KEEP_VERSIONS (default 2).
+#
 # Requires: dpkg-dev (dpkg-scanpackages), apt-utils (apt-ftparchive), gnupg.
 
 set -euo pipefail
@@ -45,6 +55,8 @@ APT_REPO_URL="${APT_REPO_URL:-https://wmp.github.io/GlobalProtect-SAML-NetworkMa
 SOURCE_PACKAGE="network-manager-gpclient"
 # Ubuntu releases we build for; the suite name is the release codename
 SUITES=(jammy noble oracular resolute)
+# How many versions of each package are published per suite and architecture
+KEEP_VERSIONS="${APT_KEEP_VERSIONS-2}"
 
 log() { echo "[build-apt-repo] $*"; }
 err() { echo "[build-apt-repo] ERROR: $*" >&2; }
@@ -58,6 +70,8 @@ trap 'rm -f "$all_packages"; rm -rf "$tmpdir"' EXIT
 while [[ "$APT_REPO_URL" == */ ]]; do APT_REPO_URL="${APT_REPO_URL%/}"; done
 [[ "$APT_REPO_URL" =~ ^https?://[A-Za-z0-9._~:/%-]+$ ]] \
     || die "APT_REPO_URL must be an http(s) URL made of A-Z a-z 0-9 . _ ~ : / % - only, got '$APT_REPO_URL'"
+[[ "$KEEP_VERSIONS" =~ ^[1-9][0-9]{0,3}$ ]] \
+    || die "APT_KEEP_VERSIONS must be a number from 1 to 9999, not '$KEEP_VERSIONS'"
 
 # Escape a value for the replacement part of a sed "s|...|...|" command:
 # backslash, & (the matched text) and the | delimiter are special there
@@ -212,7 +226,11 @@ declare -A suite_has_changelog=()
 # core package replaces it
 declare -A changelog_from_core=()
 
-for deb in "${debs[@]}"; do
+# First pass: read every package and find its suite and architecture
+declare -a d_pkg=() d_version=() d_arch=() d_suite=()
+declare -A group_members=()
+for i in "${!debs[@]}"; do
+    deb="${debs[$i]}"
     read_control "$deb" || die "cannot read the control data of $(basename "$deb")"
     suite="$(suite_for_deb "$deb" "$version")" || die \
         "cannot tell which Ubuntu release $(basename "$deb") is for - expected a
@@ -224,6 +242,40 @@ for deb in "${debs[@]}"; do
         *" $arch "*) ;;
         *) die "$(basename "$deb") has unsupported architecture '$arch' (expected: ${ARCHES[*]})" ;;
     esac
+    d_pkg[$i]="$pkg" d_version[$i]="$version" d_arch[$i]="$arch" d_suite[$i]="$suite"
+    group_members["$suite/$arch/$pkg"]+="$i "
+done
+
+# Keep the newest KEEP_VERSIONS versions of every "<suite>/<arch>/<package>".
+# A package is dropped when at least KEEP_VERSIONS others of its group are
+# strictly newer by dpkg's rules (equal versions rank alike and are all kept).
+declare -A dropped=()
+for group in "${!group_members[@]}"; do
+    read -r -a members <<< "${group_members[$group]}"
+    [ "${#members[@]}" -gt "$KEEP_VERSIONS" ] || continue
+    for i in "${members[@]}"; do
+        newer=0
+        for j in "${members[@]}"; do
+            if dpkg --compare-versions "${d_version[$j]}" gt "${d_version[$i]}"; then
+                newer=$(( newer + 1 ))
+            fi
+        done
+        if [ "$newer" -ge "$KEEP_VERSIONS" ]; then
+            dropped[$i]=1
+        fi
+    done
+done
+for i in "${!debs[@]}"; do
+    [ -z "${dropped[$i]:-}" ] || log "dropping $(basename "${debs[$i]}"):" \
+        "not among the newest $KEEP_VERSIONS version(s) of ${d_pkg[$i]} for ${d_suite[$i]}/${d_arch[$i]}"
+done
+
+# Second pass: publish what is kept (read again for the source fields)
+for i in "${!debs[@]}"; do
+    [ -z "${dropped[$i]:-}" ] || continue
+    deb="${debs[$i]}"
+    read_control "$deb" || die "cannot read the control data of $(basename "$deb")"
+    suite="${d_suite[$i]}"
     pkg_count["$suite/$arch"]=$(( ${pkg_count["$suite/$arch"]:-0} + 1 ))
 
     pool="$OUTDIR/pool/$suite/$COMPONENT/${SOURCE_PACKAGE:0:1}/$SOURCE_PACKAGE"

@@ -91,6 +91,21 @@ repository and there is no `gh-pages` branch, so:
 - the repository can be recreated from scratch (after a key rotation, say),
 - package binaries never enter the git history.
 
+**The repository keeps only the newest versions.** GitHub Pages limits a site to 1 GB,
+so the script publishes, for each suite, architecture and binary package (`Package`
+field; `Architecture: all` is a group of its own), only the newest `APT_KEEP_VERSIONS`
+versions. The default is 2: the current version and the previous one, to go back to.
+Versions are ordered like dpkg orders them (epoch, `~`, revision), not by file name.
+The build logs every `.deb` it leaves out (`dropping ...`). The dropped files are not in
+the pool, the `Packages` indexes or the changelogs, but stay as assets of their GitHub
+release, so a user can still install an old version by hand. `APT_KEEP_VERSIONS` must
+be a whole number from 1 to 9999 (no sign, no leading zero, not empty), otherwise the
+script stops:
+
+```bash
+APT_KEEP_VERSIONS=3 bash .github/scripts/build-apt-repo.sh incoming site "$KEY"
+```
+
 Republish by hand at any time:
 
 ```bash
