@@ -1112,9 +1112,9 @@ class TestMaintainerScripts:
         assert found == [CORE + ".postinst", CORE + ".postrm"]
 
     @pytest.mark.parametrize("script, kept", [
-        ("postinst", ["org.freedesktop.DBus.ReloadConfig", "pkill -x nm-gpclient-service", "/etc/nsswitch.conf",
+        ("postinst", ["org.freedesktop.DBus.ReloadConfig", "pkill -f \"$service_re\"", "/etc/nsswitch.conf",
                       "#DEBHELPER#"]),
-        ("postrm", ["org.freedesktop.DBus.ReloadConfig", "pkill -f \"gpclient.*service\"", "#DEBHELPER#"]),
+        ("postrm", ["org.freedesktop.DBus.ReloadConfig", "pkill -f \"$service_re\"", "#DEBHELPER#"]),
     ])
     def test_the_core_package_keeps_its_maintainer_scripts(self, script, kept):
         text = read(CORE + "." + script)

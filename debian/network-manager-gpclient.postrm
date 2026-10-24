@@ -4,9 +4,12 @@ set -e
 case "$1" in
     remove|purge)
         # Kill VPN service process if still running
-        if pgrep -f "gpclient.*service" >/dev/null 2>&1; then
+        # Match the command line of the Python interpreter that runs the service
+        # (new path or old name), anchored: see the postinst.
+        service_re='^(/usr/bin/)?python3(\.[0-9]+)* (/usr/lib/NetworkManager/nm-gpclient-service|/usr/libexec/NetworkManager/gpclient-nm-service)( |$)'
+        if pgrep -f "$service_re" >/dev/null 2>&1; then
             echo "Stopping nm-gpclient-service..."
-            pkill -f "gpclient.*service" || true
+            pkill -f "$service_re" || true
         fi
 
         # Reload D-Bus configuration

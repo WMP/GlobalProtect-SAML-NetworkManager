@@ -38,16 +38,23 @@ case "$1" in
                 /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig >/dev/null 2>&1 || true
         fi
 
-        # Kill old VPN service process if running, so NetworkManager can start fresh one
-        if pidof -x nm-gpclient-service >/dev/null 2>&1; then
+        # Stop the old VPN service, so NetworkManager starts the new one. The
+        # service is a Python script (shebang "#!/usr/bin/env python3"): its
+        # process name is python3, so match the whole command line. The pattern
+        # is anchored: it matches only an interpreter that runs the service file,
+        # not an editor, a shell or pkill itself that only names the file.
+        # The second path is the old name (a symlink in the old libexec directory).
+        service_re='^(/usr/bin/)?python3(\.[0-9]+)* /usr/lib/NetworkManager/nm-gpclient-service( |$)'
+        old_service_re='^(/usr/bin/)?python3(\.[0-9]+)* /usr/libexec/NetworkManager/gpclient-nm-service( |$)'
+        if pgrep -f "$service_re" >/dev/null 2>&1; then
             echo "Restarting nm-gpclient-service..."
-            pkill -x nm-gpclient-service || true
+            pkill -f "$service_re" || true
         fi
 
         # Also check for old process name
-        if pgrep -f "gpclient-nm-service" >/dev/null 2>&1; then
+        if pgrep -f "$old_service_re" >/dev/null 2>&1; then
             echo "Killing old gpclient-nm-service process..."
-            pkill -f "gpclient-nm-service" || true
+            pkill -f "$old_service_re" || true
         fi
 
         remove_legacy_edge_wrapper /tmp
