@@ -88,7 +88,7 @@ class TestPublished:
     def test_the_summary_says_what_the_script_detects(self):
         summary = published()["output"]["summary"]
 
-        for text in ("/etc/os-release", "amd64 or arm64", "XDG_CURRENT_DESKTOP", "--desktop gnome", "pip3 install sdbus"):
+        for text in ("/etc/os-release", "amd64 or arm64", "XDG_CURRENT_DESKTOP", "--desktop gnome", "sudo pip3 install sdbus"):
             assert text in summary
 
     def test_the_summary_lists_the_published_files_sorted(self):

@@ -105,7 +105,8 @@ def published_summary(repo, pr, sha, script_ref, debs, rpms=()):
             "",
             "It prints what it is going to install and lets apt ask for confirmation "
             "(`--yes` skips the question). On Ubuntu 22.04 `python3-sdbus` is not in apt: "
-            "run `pip3 install sdbus` first.",
+            "run `sudo apt install python3-pip && sudo pip3 install sdbus` first (as root: "
+            "the service runs as root and does not see a user's `~/.local`).",
             "",
             "Run it as shown (`bash <(...)`), not as `curl ... | bash`: apt needs the terminal.",
             "",

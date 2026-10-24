@@ -369,8 +369,9 @@ if [ "$codename" = "jammy" ]; then
     cat <<'EOF'
 
 Ubuntu 22.04 only: python3-sdbus is not in apt, install it with pip first
-(if you have not yet):
-    pip3 install sdbus
+(if you have not yet). The service runs as root, so install it system-wide:
+    sudo apt install python3-pip
+    sudo pip3 install sdbus
 EOF
 fi
 

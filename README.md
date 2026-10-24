@@ -43,9 +43,13 @@ sudo apt install network-manager-gpclient-plasma-6 # KDE neon (Ubuntu 24.04 with
 Supported: Ubuntu 22.04, 24.04, 24.10 and 26.04, `amd64` and `arm64`. Details, deb822 format and
 removal instructions: [docs/APT_REPO.md](docs/APT_REPO.md).
 
-**Ubuntu 22.04 only:** `python3-sdbus` is not in apt, install it with pip first:
+**Ubuntu 22.04 only:** `python3-sdbus` is not in apt, install it with pip first.
+NetworkManager runs the service as root, so install it system-wide with `sudo`
+(a plain `pip3 install` as your user puts it in `~/.local`, where root's Python
+does not look):
 ```bash
-pip3 install sdbus
+sudo apt install python3-pip
+sudo pip3 install sdbus
 ```
 
 <details>
@@ -103,8 +107,8 @@ sudo apt autoremove
 
 Installing from the apt repository pulls the runtime prerequisites
 (`openconnect`, `python3-sdbus`, `vpnc-scripts`) in by itself. On Ubuntu 22.04
-`python3-sdbus` is not in apt — use the `pip3 install sdbus` step shown above
-instead.
+`python3-sdbus` is not in apt — use the `sudo pip3 install sdbus` step shown
+above instead.
 
 Thanks to @ottuzzi for the writeup
 ([#3](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/issues/3)).

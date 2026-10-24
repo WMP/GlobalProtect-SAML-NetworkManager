@@ -445,7 +445,7 @@ class TestInstall:
 
         result = box.run("24")
 
-        assert "pip3 install sdbus" in result.stdout
+        assert "sudo pip3 install sdbus" in result.stdout
 
     @pytest.mark.parametrize("codename", ["noble", "oracular", "resolute"])
     def test_the_python3_sdbus_note_is_not_shown_elsewhere(self, box, codename):
