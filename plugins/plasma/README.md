@@ -114,7 +114,7 @@ sudo make install
 4. Fill in the configuration:
    - **Gateway**: Your VPN server (e.g., `vpn.company.com`)
    - **Browser**: Browser path for 2FA (e.g., `/usr/bin/firefox`)
-   - **Connect timeout**: Seconds NetworkManager waits for the VPN, including the browser login (`0` = NetworkManager default, new connections start with 180)
+   - **Connect timeout**: Seconds NetworkManager waits for the VPN, including the browser login (`0` = NetworkManager default, new connections with browser login start with 360 s)
    - **DNS Servers**: Optional DNS servers (e.g., `8.8.8.8;8.8.4.4`)
 5. Click **OK** to save
 

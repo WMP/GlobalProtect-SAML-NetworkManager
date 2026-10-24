@@ -32,8 +32,13 @@ private:
      * keys this widget does not show (the cached gateway-list, dns-domains) are
      * not silently dropped on save. */
     NMStringMap m_originalData;
-    /* A new profile follows the authentication mode with its connect timeout
-     * (180 s for the browser, 0 otherwise) until the user sets a value. */
+    /* vpn.persistent and vpn.user-name of the loaded setting; setting() builds a
+     * new one and would reset them. Secrets are not copied. */
+    bool m_persistent = false;
+    QString m_userName;
+    /* While the stored connect timeout is 0 (new or existing profile), the
+     * timeout follows the authentication mode (360 s for the browser, 0
+     * otherwise) until the user sets a value. */
     bool m_timeoutFollowsAuthMode = false;
 };
 

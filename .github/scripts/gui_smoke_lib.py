@@ -21,16 +21,22 @@ USERNAME = "test-user"
 AUTH_ITEMS = ["Browser (SAML, passkey, 2FA)", "Username and password (RSA token)"]
 AUTH_ACTIVE = "Username and password (RSA token)"  # for auth-mode=credentials
 AS_GATEWAY_LABEL = "Address is a gateway (skip the portal)"
-# vpn.timeout of the test connection: a value "the user set" (not 0, not 180)
-TIMEOUT = 240
-# What a new profile with browser authentication starts with (issue #46)
-SAML_TIMEOUT = 180
+# vpn.timeout of the test connection: a value "the user set" (not 0, not 360)
+VPN_TIMEOUT = 240
+# What browser authentication starts with (issue #46)
+SAML_TIMEOUT = 360
 
-# Save scenarios of the connect timeout. Each case opens the editor (a new
-# profile has only the service type, an existing one has vpn.data and a stored
-# vpn.timeout), applies the steps ("auth", combo index) and ("spin", value),
-# then compares the spin button (shown) and the vpn.timeout that
-# update_connection() writes (saved) with the expectation.
+# Save scenarios of the connect timeout. Each case opens the editor and applies
+# the steps; the editor is shown in a window first, like in the real hosts.
+#   new      a new profile has only the service type, an existing one has vpn.data
+#   timeout  the stored vpn.timeout (also of a new profile)
+#   vpn_data the vpn.data of an existing profile (default: vpn_data())
+#   steps    ("auth", combo index) selects an authentication mode, ("spin", int)
+#            sets the value like the +/- buttons, ("type", "digits") types text
+#            into the spin button without committing it (no Enter, no focus-out)
+#   shown    the number in the spin button after the steps (what the user sees)
+#   saved    the vpn.timeout that update_connection() writes
+STEP_KINDS = ("auth", "spin", "type")
 TIMEOUT_CASES = [
     {"name": "new profile", "new": True, "timeout": 0, "steps": [],
      "shown": SAML_TIMEOUT, "saved": SAML_TIMEOUT},
@@ -40,11 +46,49 @@ TIMEOUT_CASES = [
      "steps": [("auth", 1), ("auth", 0)], "shown": SAML_TIMEOUT, "saved": SAML_TIMEOUT},
     {"name": "new profile, own value, credentials", "new": True, "timeout": 0,
      "steps": [("spin", 300), ("auth", 1)], "shown": 300, "saved": 300},
+    {"name": "new profile, typed value, credentials", "new": True, "timeout": 0,
+     "steps": [("type", "500"), ("auth", 1)], "shown": 500, "saved": 500},
+    {"name": "new profile with a timeout, credentials", "new": True, "timeout": 90,
+     "steps": [("auth", 1)], "shown": 90, "saved": 90},
     {"name": "existing SAML profile without timeout", "new": False, "timeout": 0, "steps": [],
      "vpn_data": {"gateway": GATEWAY}, "shown": 0, "saved": 0},
-    {"name": "existing profile with timeout, browser", "new": False, "timeout": TIMEOUT,
-     "steps": [("auth", 0)], "shown": TIMEOUT, "saved": TIMEOUT},
+    {"name": "existing credentials profile without timeout, browser", "new": False, "timeout": 0,
+     "steps": [("auth", 0)], "shown": SAML_TIMEOUT, "saved": SAML_TIMEOUT},
+    {"name": "existing profile with timeout, browser", "new": False, "timeout": VPN_TIMEOUT,
+     "steps": [("auth", 0)], "shown": VPN_TIMEOUT, "saved": VPN_TIMEOUT},
+    {"name": "existing profile, typed value", "new": False, "timeout": VPN_TIMEOUT,
+     "steps": [("type", "300")], "shown": 300, "saved": 300},
+    # a numeric spin button accepts a sign; GTK parses with g_strtod and clamps
+    {"name": "existing profile, typed sign", "new": False, "timeout": VPN_TIMEOUT,
+     "steps": [("type", "+90")], "shown": 90, "saved": 90},
+    {"name": "existing profile, typed negative value", "new": False, "timeout": VPN_TIMEOUT,
+     "steps": [("type", "-5")], "shown": -5, "saved": 0},
+    {"name": "existing profile, typed value above the range", "new": False, "timeout": VPN_TIMEOUT,
+     "steps": [("type", "99999999999999999999")], "shown": 99999999999999999999, "saved": 4294967295},
+    # vpn.timeout is a guint32: values above 2^31 must survive a save
+    {"name": "existing profile with a timeout above 2^31", "new": False, "timeout": 3000000000,
+     "steps": [], "shown": 3000000000, "saved": 3000000000},
+    {"name": "existing profile with the largest timeout", "new": False, "timeout": 4294967295,
+     "steps": [], "shown": 4294967295, "saved": 4294967295},
 ]
+
+
+def step_problems(step):
+    """The problems of one step of a TIMEOUT_CASES entry (empty list = fine)"""
+    if not isinstance(step, tuple) or len(step) != 2:
+        return [f"step {step!r} is not a (kind, value) pair"]
+    kind, value = step
+    if kind not in STEP_KINDS:
+        return [f"unknown step kind {kind!r}"]
+    if kind == "auth":
+        if type(value) is not int or value not in (0, 1):
+            return [f"auth index {value!r} is not the int 0 or 1"]
+    elif kind == "spin":
+        if type(value) is not int or not 0 <= value <= 4294967295:
+            return [f"spin value {value!r} is not an int in 0..4294967295"]
+    elif not isinstance(value, str) or not value.isascii() or not re.fullmatch(r"[+-]?[0-9]+", value):
+        return [f"typed text {value!r} is not an ASCII number with an optional sign"]
+    return []
 
 
 def parse_name_file(text):
@@ -127,9 +171,9 @@ def check_editor(root, width, height):
     spins = [n for n in nodes if n.get("kind") == "spin"]
     if not spins:
         problems.append("no spin button for the connect timeout")
-    elif not any(n.get("value") == TIMEOUT for n in spins):
+    elif not any(n.get("value") == VPN_TIMEOUT for n in spins):
         shown = [n.get("value") for n in spins]
-        problems.append(f"the connect timeout is not {TIMEOUT} (shown: {shown})")
+        problems.append(f"the connect timeout is not {VPN_TIMEOUT} (shown: {shown})")
 
     checks = [n for n in nodes if n.get("kind") == "check" and n.get("text") == AS_GATEWAY_LABEL]
     if not checks:
@@ -141,18 +185,25 @@ def check_editor(root, width, height):
 
 def check_timeout_results(results):
     """The problems of the connect timeout scenarios (empty list = fine):
-    `results` maps the name of a TIMEOUT_CASES entry to (shown, saved)."""
+    `results` maps the name of a TIMEOUT_CASES entry to a dict with
+    "shown" (number in the spin button), "saved" (vpn.timeout after
+    update_connection()), "silent_steps" (steps after which the editor did not
+    emit "changed") and "changed_on_save" ("changed" during update_connection())."""
     problems = []
     for case in TIMEOUT_CASES:
         name = case["name"]
         if name not in results:
             problems.append(f"connect timeout case {name!r} did not run")
             continue
-        shown, saved = results[name]
-        if shown != case["shown"]:
-            problems.append(f"{name}: the connect timeout shown is {shown}, expected {case['shown']}")
-        if saved != case["saved"]:
-            problems.append(f"{name}: the connect timeout saved is {saved}, expected {case['saved']}")
+        result = results[name]
+        if result["shown"] != case["shown"]:
+            problems.append(f"{name}: the connect timeout shown is {result['shown']}, expected {case['shown']}")
+        if result["saved"] != case["saved"]:
+            problems.append(f"{name}: the connect timeout saved is {result['saved']}, expected {case['saved']}")
+        if result["silent_steps"] != 0:
+            problems.append(f"{name}: a user action did not emit changed ({result['silent_steps']} steps)")
+        if result["changed_on_save"] != 0:
+            problems.append(f"{name}: update_connection emitted changed ({result['changed_on_save']} times)")
     return problems
 
 

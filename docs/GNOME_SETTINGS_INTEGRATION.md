@@ -4,7 +4,7 @@
 
 ### 1. GTK4 Editor (`nm-gpclient-editor.c`)
 - **Type System**: `NMGpclientEditor` - GObject implementing `NMVpnEditor` interface
-- **UI Widget**: GTK4 grid with 3 labeled entry fields:
+- **UI Widget**: GTK4 grid with labeled fields, among them:
   - Gateway (VPN server address)
   - Browser (path for 2FA/SAML authentication)
   - Connect timeout (NetworkManager's `vpn.timeout`, in seconds)

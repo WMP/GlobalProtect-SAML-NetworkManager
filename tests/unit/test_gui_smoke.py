@@ -200,7 +200,7 @@ class TestEditorCheck:
 
         assert lib.check_editor(tree, 700, 300) == ["no spin button for the connect timeout"]
 
-    @pytest.mark.parametrize("value", [0, 180, 239, 241, None])
+    @pytest.mark.parametrize("value", [0, 180, 360, 239, 241, None])
     def test_wrong_connect_timeout(self, value):
         tree = good_tree()
         tree["children"][6]["children"][0] = spin(value)
@@ -230,8 +230,16 @@ class TestEditorCheck:
         assert tree == before
 
 
+def good_result(case):
+    return {"shown": case["shown"], "saved": case["saved"], "silent_steps": 0, "changed_on_save": 0}
+
+
 def good_results():
-    return {case["name"]: (case["shown"], case["saved"]) for case in lib.TIMEOUT_CASES}
+    return {case["name"]: good_result(case) for case in lib.TIMEOUT_CASES}
+
+
+CASE_IDS = [case["name"] for case in lib.TIMEOUT_CASES]
+CASES = pytest.mark.parametrize("case", lib.TIMEOUT_CASES, ids=CASE_IDS)
 
 
 class TestTimeoutCases:
@@ -239,58 +247,90 @@ class TestTimeoutCases:
         assert lib.check_timeout_results(good_results()) == []
 
     def test_the_constants(self):
-        assert lib.TIMEOUT == 240
-        assert lib.SAML_TIMEOUT == 180
+        assert lib.VPN_TIMEOUT == 240
+        assert lib.SAML_TIMEOUT == 360
 
     def test_the_timeout_of_the_test_connection_is_neither_zero_nor_the_default(self):
-        assert lib.TIMEOUT not in (0, lib.SAML_TIMEOUT)
+        assert lib.VPN_TIMEOUT not in (0, lib.SAML_TIMEOUT)
 
-    def test_case_names_are_unique_and_steps_are_known(self):
+    def test_the_table_has_the_shape_the_probe_needs(self):
         names = [case["name"] for case in lib.TIMEOUT_CASES]
 
         assert len(names) == len(set(names))
         for case in lib.TIMEOUT_CASES:
-            assert all(kind in ("auth", "spin") for kind, _ in case["steps"])
+            assert isinstance(case["new"], bool)
+            assert isinstance(case["timeout"], int) and case["timeout"] >= 0
+            assert isinstance(case["shown"], int) and isinstance(case["saved"], int)
+            if case["new"]:
+                assert "vpn_data" not in case  # a new profile has no vpn.data
+            for step in case["steps"]:
+                assert lib.step_problems(step) == []
 
-    def test_a_new_profile_follows_the_authentication_mode_until_the_user_sets_a_value(self):
-        expected = {case["name"]: (case["shown"], case["saved"]) for case in lib.TIMEOUT_CASES}
+    def test_the_table_has_values_above_two_to_the_31(self):
+        timeouts = [case["timeout"] for case in lib.TIMEOUT_CASES]
 
-        assert expected["new profile"] == (180, 180)
-        assert expected["new profile, credentials"] == (0, 0)
-        assert expected["new profile, credentials, browser"] == (180, 180)
-        assert expected["new profile, own value, credentials"] == (300, 300)
+        assert any(2**31 < t < 2**32 - 1 for t in timeouts)
+        assert 2**32 - 1 in timeouts
 
-    def test_an_existing_profile_is_not_changed(self):
-        expected = {case["name"]: (case["shown"], case["saved"]) for case in lib.TIMEOUT_CASES}
+    @pytest.mark.parametrize("step", [
+        ("auth", 0), ("auth", 1), ("spin", 0), ("spin", 300), ("spin", 4294967295),
+        ("type", "500"), ("type", "+90"), ("type", "-5")])
+    def test_a_good_step_has_no_problems(self, step):
+        assert lib.step_problems(step) == []
 
-        assert expected["existing SAML profile without timeout"] == (0, 0)
-        assert expected["existing profile with timeout, browser"] == (240, 240)
+    @pytest.mark.parametrize("step", [
+        ("auth", 2), ("auth", -1), ("auth", True), ("auth", "1"),
+        ("auth", 1.0), ("spin", "5"), ("spin", True), ("spin", -1), ("spin", 1.5),
+        ("spin", 4294967296),
+        ("type", ""), ("type", "5x"), ("type", "+"), ("type", "1-"), ("type", " 5"), ("type", 5), ("type", "\u0665"),
+        ("click", 1), ("auth",), "auth", None])
+    def test_the_shape_test_would_reject_a_bad_step(self, step):
+        assert lib.step_problems(step) != []
 
-    @pytest.mark.parametrize("index", range(6))
+    @CASES
     @pytest.mark.parametrize("wrong", [-1, 1, 60, 181, None])
-    def test_a_wrong_shown_value_is_reported(self, index, wrong):
-        case = lib.TIMEOUT_CASES[index]
+    def test_a_wrong_shown_value_is_reported(self, case, wrong):
         results = good_results()
-        results[case["name"]] = (wrong, case["saved"])
+        results[case["name"]]["shown"] = wrong
 
         problems = lib.check_timeout_results(results)
 
         assert len(problems) == 1 and case["name"] in problems[0] and "shown" in problems[0]
 
-    @pytest.mark.parametrize("index", range(6))
+    @CASES
     @pytest.mark.parametrize("wrong", [-1, 1, 60, 181, None])
-    def test_a_wrong_saved_value_is_reported(self, index, wrong):
-        case = lib.TIMEOUT_CASES[index]
+    def test_a_wrong_saved_value_is_reported(self, case, wrong):
         results = good_results()
-        results[case["name"]] = (case["shown"], wrong)
+        results[case["name"]]["saved"] = wrong
 
         problems = lib.check_timeout_results(results)
 
         assert len(problems) == 1 and case["name"] in problems[0] and "saved" in problems[0]
 
-    @pytest.mark.parametrize("index", range(6))
-    def test_a_missing_case_is_reported(self, index):
-        case = lib.TIMEOUT_CASES[index]
+    @CASES
+    @pytest.mark.parametrize("count", [1, 2])
+    def test_a_step_without_changed_is_reported(self, case, count):
+        results = good_results()
+        results[case["name"]]["silent_steps"] = count
+
+        problems = lib.check_timeout_results(results)
+
+        assert len(problems) == 1 and case["name"] in problems[0]
+        assert "a user action did not emit changed" in problems[0]
+
+    @CASES
+    @pytest.mark.parametrize("count", [1, 3])
+    def test_changed_during_update_connection_is_reported(self, case, count):
+        results = good_results()
+        results[case["name"]]["changed_on_save"] = count
+
+        problems = lib.check_timeout_results(results)
+
+        assert len(problems) == 1 and case["name"] in problems[0]
+        assert "update_connection emitted changed" in problems[0]
+
+    @CASES
+    def test_a_missing_case_is_reported(self, case):
         results = good_results()
         del results[case["name"]]
 
@@ -332,7 +372,8 @@ class TestEditorTextsMatchTheSources:
     @pytest.mark.parametrize("source, definition", [
         ("gnome/nm-gpclient-editor.c", "#define SAML_TIMEOUT_DEFAULT {}\n"),
         ("gnome/nm-gpclient-editor-gtk3.c", "#define SAML_TIMEOUT_DEFAULT {}\n"),
-        # The Plasma editor runs in no smoke test: this is its only check
+        # The Plasma editor is not in the GTK smoke test; its QtTest (plugins/plasma/tests)
+        # runs the widget, and this checks that the constant is the same
         ("plasma/gpclientwidget.cpp", "static const int samlTimeoutDefault = {};\n"),
     ])
     def test_the_saml_timeout_is_the_one_of_the_editor(self, source, definition):
@@ -681,9 +722,14 @@ class TestProbeNodes:
             pass
 
     def test_a_spin_button_becomes_a_spin_node(self):
-        spin_button = type("S", (self.Gtk.SpinButton,), {"get_value_as_int": lambda self: 240, "get_text": lambda self: "240"})()
+        spin_button = type("S", (self.Gtk.SpinButton,), {"get_value": lambda self: 240.0, "get_text": lambda self: "240"})()
 
         assert gui_smoke_gtk.to_node(spin_button, self.Gtk, 3) == {"kind": "spin", "value": 240, "children": []}
+
+    def test_a_spin_button_above_two_to_the_31_becomes_a_spin_node(self):
+        spin_button = type("S", (self.Gtk.SpinButton,), {"get_value": lambda self: 4294967295.0})()
+
+        assert gui_smoke_gtk.to_node(spin_button, self.Gtk, 3)["value"] == 4294967295
 
     def test_an_entry_stays_an_entry(self):
         entry_widget = type("E", (self.Gtk.Entry,), {"get_text": lambda self: "x"})()
@@ -738,4 +784,4 @@ class TestTooltips:
             source = handle.read()
         main = source[source.index("def main("):]
 
-        assert main.index("without_tooltips(widget") < main.index("window = Gtk.Window()")
+        assert main.index("without_tooltips(widget") < main.index("show_in_window(widget")

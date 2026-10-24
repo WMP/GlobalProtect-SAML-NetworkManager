@@ -128,10 +128,10 @@ Select 'Custom...' to give the full path to your own executable.</string>
     </widget>
    </item>
    <item row="6" column="1">
-    <widget class="QSpinBox" name="timeoutSpinBox">
+    <widget class="QDoubleSpinBox" name="timeoutSpinBox">
      <property name="toolTip">
       <string>How long NetworkManager waits for the VPN to connect, including the login in the browser (vpn.timeout).
-0 uses the NetworkManager default, usually 60 s - often too short for a SAML login with MFA. New connections with browser authentication start with 180 s.</string>
+0 uses the NetworkManager default, usually 60 s - often too short for a SAML login with MFA. A new connection with browser authentication starts with 360 s. While a connection has no timeout of its own (0) and you have not changed this field, choosing browser authentication sets 360 s.</string>
      </property>
      <property name="specialValueText">
       <string>NetworkManager default (usually 60 s)</string>
@@ -139,14 +139,17 @@ Select 'Custom...' to give the full path to your own executable.</string>
      <property name="suffix">
       <string> s</string>
      </property>
-     <property name="minimum">
+     <property name="decimals">
       <number>0</number>
      </property>
+     <property name="minimum">
+      <double>0</double>
+     </property>
      <property name="maximum">
-      <number>2147483647</number>
+      <double>4294967295</double>
      </property>
      <property name="singleStep">
-      <number>10</number>
+      <double>10</double>
      </property>
     </widget>
    </item>

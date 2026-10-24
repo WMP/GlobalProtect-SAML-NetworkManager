@@ -162,12 +162,21 @@ nmcli connection modify "My VPN" +vpn.data hip-script=/usr/local/bin/gp-hip-repo
 ```
 
 The **Connect timeout** field is NetworkManager's own `vpn.timeout`, not a
-`vpn.data` item: set it with `nmcli connection modify "My VPN" vpn.timeout 180`.
+`vpn.data` item: set it with `nmcli connection modify "My VPN" vpn.timeout 360`.
 NetworkManager stops the connection after that many seconds, and the login in
 the browser counts towards it. `0` means the NetworkManager default, usually
-60 s, which is often too short for a SAML login with MFA. New connections with
-browser login start with 180 s; existing connections keep their value
+60 s, which is often too short for a SAML login with MFA. A new connection with
+browser login starts with 360 s. While a connection has no timeout of its own
+(0) and you have not changed the field, choosing browser login sets 360 s
 ([#46](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/issues/46)).
+Choosing browser login on a connection with 0 writes 360 s, which replaces a
+global default from `NetworkManager.conf`; set the field back to 0 to keep that
+default.
+
+An existing connection with 0 keeps 0: the editor cannot tell it from a
+deliberate 0, and `NetworkManager.conf` can set a longer global default for 0.
+If it fails with "connect timeout exceeded", set **Connect timeout** to 360 or
+run the `nmcli` command above.
 
 The DNS servers and search domains the gateway pushes are reported to
 NetworkManager as part of the VPN's IP configuration, so they survive

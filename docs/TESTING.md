@@ -92,11 +92,22 @@ connection editor starts:
   shows the gateway, the preferred gateway and the two gateways of the list, the
   username, the authentication mode, the "Address is a gateway" check button
   and the connect timeout (a spin button showing the `vpn.timeout` of the test
-  connection). It then runs the save scenarios of `TIMEOUT_CASES` in
-  `gui_smoke_lib.py`: a new profile starts with 180 s for browser login and 0
-  for username and password (until the user sets a value), an existing profile
-  keeps its value, and `update_connection()` writes the shown value to
-  `vpn.timeout`.
+  connection). It then runs the 15 save scenarios of `TIMEOUT_CASES` in
+  `gui_smoke_lib.py`. Each one shows the editor in its own window and applies
+  steps: choose an authentication mode, set the spin button value, or type text
+  into it without committing it. A new profile starts with 360 s for browser
+  login and 0 for username and password (until the user sets a value). An
+  existing profile keeps its value, and a stored 0 that the user has not changed
+  changes to 360 s when the
+  user chooses browser login. Two scenarios store a value above 2^31 (3000000000
+  and 4294967295, the largest `guint32`) and expect it to survive a save. Three
+  scenarios type a sign or a number out of range without committing it: `+90`
+  saves 90, `-5` saves 0 and `99999999999999999999` saves 4294967295 (GTK parses
+  the text with `g_strtod` and clamps it to the range). The
+  checks are: the number shown, the
+  `vpn.timeout` that `update_connection()` writes (also for typed text), a
+  "changed" signal after every user action (GNOME Settings enables Apply only
+  on it), and no "changed" signal during `update_connection()`.
   It runs for GTK3 and, where the package ships the GTK4 editor (not on 22.04),
   for GTK4 in a second process.
 - **KDE neon** (`neon`): installs `network-manager-gpclient-plasma-6` in an
@@ -113,6 +124,9 @@ connection editor starts:
   the test. PyQt5 cannot read the metadata of a loaded plugin, so the JSON file
   next to the plugin is checked then. There is **no screenshot**: showing the
   Plasma editor needs a small C++ harness against plasma-nm, a possible follow-up.
+  The widget itself runs in a QtTest (`plugins/plasma/tests/gpclientwidgettest.cpp`)
+  that `ctest` runs in the package build (`override_dh_auto_test` in
+  `debian/rules`), not in this smoke test.
 
 The screenshots (`gnome-gtk3-<codename>-<arch>.png`, `gnome-gtk4-...png`) are in
 the artifact `gui-smoke-ubuntu-<ubuntu>-<arch>` of the workflow run (step "Upload

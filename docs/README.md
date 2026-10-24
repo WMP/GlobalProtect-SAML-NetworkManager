@@ -48,7 +48,7 @@ Fedora, RHEL 10 and openSUSE: see [RPM_REPO.md](RPM_REPO.md).
 4. Configure:
    - **Gateway**: Your VPN server (e.g., `vpn.company.com`)
    - **Browser**: Path to browser for 2FA (default: `/usr/bin/edge-wrapper`)
-   - **Connect timeout**: Seconds NetworkManager waits for the VPN, including the browser login (`0` = NetworkManager default, new connections start with 180)
+   - **Connect timeout**: Seconds NetworkManager waits for the VPN, including the browser login (`0` = NetworkManager default, new connections with browser login start with 360 s)
    - **DNS Servers**: Optional custom DNS (e.g., `8.8.8.8;8.8.4.4`)
 5. Click **Save**
 
