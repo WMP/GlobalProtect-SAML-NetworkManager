@@ -309,6 +309,103 @@ class TestTimeoutCases:
         assert results == before
 
 
+def good_mtu_results():
+    return {case["name"]: (case["shown"], case["saved"]) for case in lib.MTU_CASES}
+
+
+class TestMtuCases:
+    def test_the_expected_results_pass(self):
+        assert lib.check_mtu_results(good_mtu_results()) == []
+
+    def test_the_limits_are_the_ones_of_the_editors(self):
+        assert (lib.MTU_MIN, lib.MTU_MAX) == (576, 1500)
+
+    def test_case_names_are_unique(self):
+        names = [case["name"] for case in lib.MTU_CASES]
+
+        assert len(names) == len(set(names))
+
+    def test_a_value_below_the_minimum_is_saved_as_the_minimum_and_zero_removes_the_key(self):
+        expected = good_mtu_results()
+
+        assert expected["mtu: 400 is saved as 576"] == (400, "576")
+        assert expected["mtu: 0 removes the key"] == (0, None)
+        assert expected["mtu: 1400 is saved"] == (1400, "1400")
+
+    def test_a_stored_value_the_editor_cannot_show_is_kept_until_the_user_changes_the_field(self):
+        expected = good_mtu_results()
+
+        assert expected["mtu: stored 1600 is kept when untouched"] == (0, "1600")
+        assert expected["mtu: stored abc is kept when untouched"] == (0, "abc")
+        assert expected["mtu: stored 1600, 0 set: the key stays"] == (0, "1600")
+        assert expected["mtu: stored 1600 replaced by 1300"] == (1300, "1300")
+        assert expected["mtu: stored abc replaced by 400"] == (400, "576")
+        # a value that is shown, or only zeros, is not kept as text
+        assert expected["mtu: stored 00 is automatic"] == (0, None)
+        assert expected["mtu: 0 removes the key"] == (0, None)
+        # touched: the user set 1300 and then 0
+        assert expected["mtu: stored 1600, 1300 then 0: the key is removed"] == (0, None)
+
+    @pytest.mark.parametrize("index", range(len(lib.MTU_CASES)))
+    def test_a_wrong_shown_or_saved_value_is_reported(self, index):
+        case = lib.MTU_CASES[index]
+        for position, wrong in ((0, case["shown"] + 1), (1, "9999")):
+            results = good_mtu_results()
+            results[case["name"]] = tuple(wrong if i == position else v
+                                          for i, v in enumerate(results[case["name"]]))
+
+            problems = lib.check_mtu_results(results)
+
+            assert len(problems) == 1 and case["name"] in problems[0]
+
+    def test_a_case_that_did_not_run_is_reported(self):
+        results = good_mtu_results()
+        case = lib.MTU_CASES[0]
+        del results[case["name"]]
+
+        assert lib.check_mtu_results(results) == [f"MTU case {case['name']!r} did not run"]
+
+    def test_the_limits_are_the_ones_of_the_gtk_header(self):
+        with open(os.path.join(ROOT, "plugins", "gnome", "nm-gpclient-mtu.h"), encoding="utf-8") as handle:
+            text = handle.read()
+
+        assert f"#define MTU_MIN {lib.MTU_MIN}\n#define MTU_MAX {lib.MTU_MAX}\n" in text
+
+    @pytest.mark.parametrize("source", ["nm-gpclient-editor.c", "nm-gpclient-editor-gtk3.c"])
+    def test_the_gtk_editors_use_the_header_and_name_the_spin_button(self, source):
+        with open(os.path.join(ROOT, "plugins", "gnome", source), encoding="utf-8") as handle:
+            text = handle.read()
+
+        assert '#include "nm-gpclient-mtu.h"' in text
+        assert f'"{lib.MTU_SPIN_NAME}"' in text
+
+    def test_plasma_uses_the_header_and_its_spin_box_has_the_same_maximum(self):
+        plasma = os.path.join(ROOT, "plugins", "plasma")
+        with open(os.path.join(plasma, "gpclientwidget.cpp"), encoding="utf-8") as handle:
+            cpp = handle.read()
+        with open(os.path.join(plasma, "gpclientwidget.ui"), encoding="utf-8") as handle:
+            ui = handle.read()
+        with open(os.path.join(plasma, "CMakeLists.txt"), encoding="utf-8") as handle:
+            cmake = handle.read()
+
+        assert '#include "nm-gpclient-mtu.h"' in cpp
+        assert "nm_gpclient_mtu_parse(" in cpp
+        assert "${CMAKE_CURRENT_SOURCE_DIR}/../gnome" in cmake
+        # no second copy of the rule in the editor
+        for own in ("parseMtu", "isMtuSpace", "isAutomaticMtuText", "mtuMin", "mtuMax"):
+            assert own not in cpp
+        box = ui[ui.index('name="mtuSpinBox"'):]
+        maximum = box[box.index('<property name="maximum">'):]
+        assert f"<number>{lib.MTU_MAX}</number>" in maximum[:maximum.index("</property>")]
+
+    def test_the_gtk_editors_keep_an_invalid_stored_value_by_a_touched_flag(self):
+        for source in ("nm-gpclient-editor.c", "nm-gpclient-editor-gtk3.c"):
+            with open(os.path.join(ROOT, "plugins", "gnome", source), encoding="utf-8") as handle:
+                text = handle.read()
+
+            assert "mtu_touched" in text and "mtu_shown" not in text
+
+
 class TestEditorTextsMatchTheSources:
     """The expected texts are the ones the C sources put in the widgets"""
 

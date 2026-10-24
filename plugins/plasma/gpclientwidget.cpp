@@ -6,6 +6,9 @@
 #include "gpclientwidget.h"
 #include "ui_gpclientwidget.h"
 
+// The MTU rule (plain C, shared with the GTK editors)
+#include "nm-gpclient-mtu.h"
+
 #include <NetworkManagerQt/Utils>
 #include <QCheckBox>
 #include <QComboBox>
@@ -73,6 +76,11 @@ GpclientWidget::GpclientWidget(const NetworkManager::VpnSetting::Ptr &setting, Q
     connect(m_ui->timeoutSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [this]() {
         // The user chose a value: keep it whatever the authentication mode
         m_timeoutFollowsAuthMode = false;
+        Q_EMIT settingChanged();
+    });
+    connect(m_ui->mtuSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [this]() {
+        // loadConfig() blocks this signal while it sets the value
+        m_mtuTouched = true;
         Q_EMIT settingChanged();
     });
     connect(m_ui->usernameLineEdit, &QLineEdit::textChanged, this, &GpclientWidget::settingChanged);
@@ -193,6 +201,14 @@ void GpclientWidget::loadConfig(const NetworkManager::Setting::Ptr &setting)
             m_ui->fixOpensslComboBox->setCurrentIndex(0);
         }
 
+        // Tunnel MTU: a missing or invalid value shows as automatic (0)
+        const int mtuShown = nm_gpclient_mtu_parse(data.value(QLatin1String("mtu")).toUtf8().constData());
+        m_mtuTouched = false;
+        {
+            const QSignalBlocker blocker(m_ui->mtuSpinBox);
+            m_ui->mtuSpinBox->setValue(mtuShown > 0 ? mtuShown : 0);
+        }
+
         // Load HIP (default: enabled)
         const QString hipValue = data.value(QLatin1String("hip"), QLatin1String("true"));
         m_ui->hipCheckBox->setChecked(hipValue.toLower() == QLatin1String("true"));
@@ -279,6 +295,20 @@ QVariantMap GpclientWidget::setting() const
     default:
         data.remove(QLatin1String("fix-openssl"));
         break;
+    }
+
+    // Save the MTU: 0 = automatic (no key), below 576 is saved as 576. An
+    // invalid stored value shows as 0; while the user did not touch the spin box
+    // the key keeps its text (data starts from m_originalData).
+    const int mtu = m_ui->mtuSpinBox->value();
+    const bool keepStored = !m_mtuTouched
+        && nm_gpclient_mtu_parse(m_originalData.value(QLatin1String("mtu")).toUtf8().constData()) < 0;
+    if (keepStored) {
+        // nothing to do
+    } else if (mtu <= 0) {
+        data.remove(QLatin1String("mtu"));
+    } else {
+        data.insert(QLatin1String("mtu"), QString::number(qBound(MTU_MIN, mtu, MTU_MAX)));
     }
 
     // Save HIP

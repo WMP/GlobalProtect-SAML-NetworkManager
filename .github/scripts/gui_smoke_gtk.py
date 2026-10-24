@@ -57,7 +57,7 @@ def build_case_connection(NM, service, case):
     s_vpn = NM.SettingVpn.new()
     s_vpn.set_property("service-type", service)
     if not case["new"]:
-        s_vpn.set_property("timeout", case["timeout"])
+        s_vpn.set_property("timeout", case.get("timeout", 0))
         for key, value in case.get("vpn_data", lib.vpn_data()).items():
             s_vpn.add_data_item(key, value)
     connection.add_setting(s_vpn)
@@ -112,9 +112,10 @@ def run_timeout_case(NM, Gtk, major, plugin, service, case):
         return isinstance(w, Gtk.ComboBoxText) and [r[0] for r in w.get_model()] == lib.AUTH_ITEMS
 
     combos = find_widgets(grid, Gtk, major, is_auth_combo)
-    spins = find_widgets(grid, Gtk, major, lambda w: isinstance(w, Gtk.SpinButton))
+    spins = [w for w in find_widgets(grid, Gtk, major, lambda w: isinstance(w, Gtk.SpinButton))
+             if w.get_name() != lib.MTU_SPIN_NAME]  # not the MTU spin button
     if len(combos) != 1 or len(spins) != 1:
-        fail(f"GTK{major} editor: {len(combos)} authentication combos and {len(spins)} spin buttons, expected 1 each")
+        fail(f"GTK{major} editor: {len(combos)} authentication combos and {len(spins)} connect timeout spin buttons, expected 1 each")
     for kind, value in case["steps"]:
         if kind == "auth":
             combos[0].set_active(value)
@@ -127,6 +128,23 @@ def run_timeout_case(NM, Gtk, major, plugin, service, case):
         gateway.set_text(lib.GATEWAY)
     editor.update_connection(connection)
     return shown, connection.get_setting_vpn().get_timeout()
+
+
+def run_mtu_case(NM, Gtk, major, plugin, service, case):
+    """Open the editor for one lib.MTU_CASES entry, set the spin button and save;
+    returns (spin value shown, vpn.data mtu saved or None)"""
+    connection = build_case_connection(NM, service, {"new": False, "vpn_data": case["vpn_data"]})
+    editor = plugin.get_editor(connection)
+    grid = editor.get_widget()
+    spins = [w for w in find_widgets(grid, Gtk, major, lambda w: isinstance(w, Gtk.SpinButton))
+             if w.get_name() == lib.MTU_SPIN_NAME]
+    if len(spins) != 1:
+        fail(f"GTK{major} editor: {len(spins)} MTU spin buttons, expected 1")
+    for value in case["spins"]:
+        spins[0].set_value(value)
+    shown = spins[0].get_value_as_int()
+    editor.update_connection(connection)
+    return shown, connection.get_setting_vpn().get_data_item("mtu")
 
 
 def without_tooltips(widget, Gtk, major):
@@ -234,6 +252,17 @@ def main(argv=None):
     if problems:
         fail(f"GTK{major} editor: " + "; ".join(problems))
     print(f"OK: GTK{major} editor connect timeout, {len(results)} save scenarios")
+
+    results = {}
+    for case in lib.MTU_CASES:
+        try:
+            results[case["name"]] = run_mtu_case(NM, Gtk, major, plugin, name["service"], case)
+        except GLib.Error as error:
+            fail(f"GTK{major} editor, case {case['name']!r}: {error.message}")
+    problems = lib.check_mtu_results(results)
+    if problems:
+        fail(f"GTK{major} editor: " + "; ".join(problems))
+    print(f"OK: GTK{major} editor MTU, {len(results)} save scenarios")
 
 
 if __name__ == "__main__":

@@ -240,7 +240,6 @@ def _drive_connect(service_module, monkeypatch, data):
 
     async def nothing(*args, **kwargs):
         return None
-
     async def idle():
         return None
 
@@ -302,3 +301,159 @@ def test_do_connect_rejects_option_like_values(service_module, monkeypatch, data
 
     assert error is not None
     assert starts == []
+
+
+# --- MTU (vpn.data mtu -> gpclient connect --mtu) ---------------------------
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("576", 576),
+        ("1300", 1300),
+        ("1500", 1500),
+        (" \t1400\n", 1400),
+        ("01300", 1300),
+        ("\v1300\v", 1300),
+        ("\f1300\r", 1300),
+        ("0" * 50 + "1300", 1300),
+        ("500", 576),  # raised, like openconnect does
+        ("1", 576),
+        ("575", 576),
+        # automatic
+        ("", 0),
+        ("   ", 0),
+        ("0", 0),
+        ("00", 0),
+        ("0000", 0),
+        ("\v", 0),
+        (" 0 ", 0),
+        ("0" * 50, 0),
+    ],
+)
+def test_parse_mtu_accepts_the_rule(service_module, text, expected):
+    assert service_module.parse_mtu(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "1501",
+        "99999999999999999999",
+        "9" * 5000,
+        "-1400",
+        "+1300",
+        "1400.0",
+        "13 00",
+        "0 0",
+        "0\t0",
+        "abc",
+        "1400mtu",
+        "0x578",
+        "\u0661\u0663\u0660\u0660",  # Arabic-Indic digits
+        "\u00a01300",  # no-break space: not stripped
+        "\u20031300",  # em space: not stripped
+    ],
+)
+def test_parse_mtu_gives_none_for_invalid(service_module, text):
+    assert service_module.parse_mtu(text) is None
+
+
+def test_connect_command_passes_mtu_before_browser(
+    service_module, monkeypatch, tmp_path
+):
+    argv, wrapper = _command(
+        service_module, monkeypatch, tmp_path, mtu=1300, hip_enabled=False
+    )
+
+    assert argv[argv.index("--mtu") + 1] == "1300"
+    assert argv.index("connect") < argv.index("--mtu")
+    assert argv.index("--mtu") < argv.index(f"--browser={wrapper}")
+
+
+@pytest.mark.parametrize("mtu", [None, 0])
+def test_connect_command_has_no_mtu_when_automatic(
+    service_module, monkeypatch, tmp_path, mtu
+):
+    argv, wrapper = _command(
+        service_module, monkeypatch, tmp_path, mtu=mtu, hip_enabled=False
+    )
+
+    assert "--mtu" not in argv
+
+
+def _do_connect(service_module, monkeypatch, vpn_data):
+    """Run the connect path with `vpn_data`; gpclient is not started"""
+    plugin = service_module.GpclientVPNPlugin()
+
+    async def nothing(*args, **kwargs):
+        return None
+
+    async def started():
+        return True
+
+    async def idle():
+        pass
+
+    plugin._cleanup_stale_gpd0 = nothing
+    plugin._snapshot_tunnel_interfaces = nothing
+    plugin._start_gpclient = started
+    plugin._check_tunnel_loop = idle
+
+    async def run():
+        data = {"gateway": "portal.example.com", **vpn_data}
+        await plugin._do_connect({"vpn": {"data": ("a{ss}", data)}}, False)
+
+    asyncio.run(run())
+    return plugin
+
+
+@pytest.mark.parametrize(
+    "stored, expected",
+    [
+        ({"mtu": "1300"}, 1300),
+        ({"mtu": " 576 "}, 576),
+        ({"mtu": "01300"}, 1300),
+        ({"mtu": "500"}, 576),
+    ],
+)
+def test_connect_reads_a_valid_mtu(service_module, monkeypatch, caplog, stored, expected):
+    caplog.set_level("INFO")
+
+    plugin = _do_connect(service_module, monkeypatch, stored)
+
+    assert plugin.mtu == expected
+    assert f"MTU: {expected}" in caplog.text
+    assert "Invalid mtu" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [{}, {"mtu": ""}, {"mtu": "0"}, {"mtu": " 0 "}, {"mtu": "00"}, {"mtu": "0000"}],
+)
+def test_connect_mtu_automatic_logs_no_warning(
+    service_module, monkeypatch, caplog, stored
+):
+    caplog.set_level("INFO")
+
+    plugin = _do_connect(service_module, monkeypatch, stored)
+
+    assert plugin.mtu is None
+    assert "MTU: automatic" in caplog.text
+    assert "Invalid mtu" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["1501", "abc", "-1400", "+1300", "1400.0", "13 00", "0 0", "99999999999", "\u0661\u0663\u0660\u0660"],
+)
+def test_connect_ignores_an_invalid_mtu_with_a_warning(
+    service_module, monkeypatch, caplog, bad
+):
+    caplog.set_level("INFO")
+
+    plugin = _do_connect(service_module, monkeypatch, {"mtu": bad})
+
+    assert plugin.mtu is None
+    assert "Invalid mtu" in caplog.text
+    assert "MTU: automatic" in caplog.text

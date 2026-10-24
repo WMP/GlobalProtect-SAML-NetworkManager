@@ -35,6 +35,9 @@ private:
     /* A new profile follows the authentication mode with its connect timeout
      * (180 s for the browser, 0 otherwise) until the user sets a value. */
     bool m_timeoutFollowsAuthMode = false;
+    /* The user changed the MTU spin box after load: until then an invalid
+     * stored value (the box shows 0) is kept on save. */
+    bool m_mtuTouched = false;
 };
 
 #endif // PLASMA_NM_GPCLIENT_WIDGET_H

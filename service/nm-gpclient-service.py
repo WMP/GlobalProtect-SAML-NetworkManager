@@ -349,6 +349,34 @@ def parse_stored_gateway_count(value: str) -> Optional[int]:
     return _gateway_count_value(value.strip())
 
 
+# MTU of the tunnel (vpn.data mtu). gpclient --mtu reaches openconnect as the
+# requested MTU. openconnect uses it ONLY when the gateway sends no MTU of its
+# own (it then logs "No MTU received. Calculated N ..."); a gateway MTU wins.
+# openconnect raises values below 576 to 576, and so does this code.
+MTU_MIN = 576
+MTU_MAX = 1500
+MTU_SPACE = " \t\n\r\f\v"  # the only whitespace that is stripped
+
+
+def parse_mtu(text: str) -> Optional[int]:
+    """vpn.data mtu as a number: 0 = automatic (empty text or only zeros),
+    MTU_MIN..MTU_MAX otherwise (smaller values are raised to MTU_MIN), None
+    when the text is invalid (sign, dot, inner space, non-ASCII digits, more
+    than MTU_MAX). The same rule is in the editors (nm_gpclient_mtu_parse in
+    plugins/gnome/nm-gpclient-mtu.h, -1 there is None here)."""
+    value = text.strip(MTU_SPACE)
+    if not value:
+        return 0
+    if not (value.isascii() and value.isdigit()):
+        return None
+    digits = value.lstrip("0")
+    if not digits:
+        return 0
+    if len(digits) > 4 or int(digits) > MTU_MAX:
+        return None
+    return max(int(digits), MTU_MIN)
+
+
 # --- Interactive prompt detection -------------------------------------------
 #
 # For portals that do NOT use SAML (Prelogin::Standard in gpclient, e.g. RSA
@@ -1280,6 +1308,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
 
         # Portal / gateway selection (issue #7)
         self.as_gateway = False
+        self.mtu: Optional[int] = None  # pass --mtu to gpclient when set
         self.preferred_gateway = ""
         self._connection_uuid = ""
         self._permission_user = ""  # sole user of connection.permissions
@@ -1546,6 +1575,18 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             self.fix_openssl = self.fix_openssl_mode == "true"
             logger.info(f"fix-openssl: {self.fix_openssl_mode}")
 
+            # Tunnel MTU: empty or 0 means automatic. An invalid value is
+            # ignored so a typo cannot break the connection. openconnect uses
+            # the value only when the gateway sends no MTU.
+            mtu_text = data_dict.get("mtu", "")
+            mtu = parse_mtu(mtu_text)
+            if mtu is None:
+                logger.warning(
+                    f"Invalid mtu value {mtu_text!r} (use 576-1500), ignoring it"
+                )
+            self.mtu = mtu or None
+            logger.info(f"MTU: {self.mtu if self.mtu else 'automatic'}")
+
             # Portal / gateway handling (issue #7)
             self.as_gateway = data_dict.get("as-gateway", "false").lower() == "true"
             self.preferred_gateway = data_dict.get("preferred-gateway", "").strip()
@@ -1700,6 +1741,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         self._otp_flags_written = False
         self._otp_flag_attempts = 0
         self.as_gateway = False
+        self.mtu = None
         self.preferred_gateway = ""
         self._connection_uuid = ""
         self._permission_user = ""
@@ -2203,6 +2245,11 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
             # so the user is not authenticated twice
             if self.as_gateway:
                 cmd.append("--as-gateway")
+
+            # Tunnel MTU, set when the automatic value is too big for the
+            # network (ESP falls back to HTTPS with "Message too long")
+            if self.mtu:
+                cmd.extend(["--mtu", str(self.mtu)])
 
             # Pass stored username so standard-login portals don't prompt for it
             if self.vpn_username:

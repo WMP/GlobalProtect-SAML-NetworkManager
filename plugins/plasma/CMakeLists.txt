@@ -69,7 +69,10 @@ ki18n_wrap_ui(gpclient_SRCS gpclientwidget.ui)
 add_library(plasmanetworkmanagement_gpclientui MODULE ${gpclient_SRCS})
 
 # Add local include directory for plasma-nm headers
-target_include_directories(plasmanetworkmanagement_gpclientui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+# nm-gpclient-mtu.h (the MTU rule) is shared with the GTK editors
+target_include_directories(plasmanetworkmanagement_gpclientui PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gnome)
 
 target_link_libraries(plasmanetworkmanagement_gpclientui
     ${QT_TARGETS}

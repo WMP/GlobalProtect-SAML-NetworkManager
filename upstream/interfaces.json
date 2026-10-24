@@ -173,6 +173,7 @@
         "cli-fix-openssl",
         "cli-hip",
         "cli-as-gateway",
+        "cli-mtu",
         "cli-user",
         "cli-browser",
         "sudo-uid",
@@ -180,6 +181,8 @@
       ],
       "tests": [
         "tests/unit/test_upstream_interfaces.py::test_start_gpclient_passes_flags_and_environment",
+        "tests/unit/test_upstream_interfaces.py::test_start_gpclient_passes_the_mtu_before_the_browser",
+        "tests/unit/test_upstream_interfaces.py::test_start_gpclient_leaves_out_the_mtu_when_automatic",
         "tests/unit/test_upstream_interfaces.py::test_start_gpclient_leaves_out_optional_flags_by_default",
         "tests/unit/test_upstream_interfaces.py::test_start_gpclient_fails_cleanly_when_the_binary_is_missing",
         "tests/unit/test_hip_script.py::test_hip_script_is_one_argv_item"

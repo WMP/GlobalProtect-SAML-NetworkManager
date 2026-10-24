@@ -193,6 +193,13 @@
       "used_by": "service/nm-gpclient-service.py: --hip"
     },
     {
+      "id": "cli-mtu",
+      "kind": "anchor",
+      "path": "apps/gpclient/src/connect/args.rs",
+      "text": "pub(super) mtu: Option<u32>,",
+      "used_by": "service/nm-gpclient-service.py: --mtu"
+    },
+    {
       "id": "code-obtain-credential",
       "kind": "block",
       "role": "code",

@@ -8,6 +8,7 @@
   - Gateway (VPN server address)
   - Browser (path for 2FA/SAML authentication)
   - Connect timeout (NetworkManager's `vpn.timeout`, in seconds)
+  - MTU (`mtu` in `vpn.data`, 0 = automatic; used only when the gateway sends no MTU)
   - DNS Servers (semicolon-separated, optional)
 - **Data Binding**: Loads values from `NMSettingVpn` and saves back on connection update
 - **Memory Management**: Proper `g_object_ref_sink()` and disposal
@@ -160,6 +161,7 @@ When working correctly:
    - Gateway: [text entry]
    - Browser: [text entry]  
    - Connect timeout: [spin button]
+   - MTU: [spin button]
    - DNS Servers: [text entry]
 4. Values persist after saving
 5. No "unable to load" errors

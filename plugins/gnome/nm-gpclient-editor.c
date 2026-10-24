@@ -4,6 +4,7 @@
 #include <NetworkManager.h>
 #include <nm-vpn-editor-plugin.h>
 #include "nm-gpclient-editor.h"
+#include "nm-gpclient-mtu.h"
 
 struct _NMGpclientEditor {
     GObject parent;
@@ -16,6 +17,9 @@ struct _NMGpclientEditor {
     GtkWidget *username_entry;
     GtkWidget *browser_combo;
     GtkWidget *timeout_spin;
+    GtkWidget *mtu_spin;
+    char *mtu_stored;  /* raw vpn.data mtu at load, NULL if none */
+    gboolean mtu_touched;  /* the user changed the spin button after load */
     gboolean timeout_follows_auth_mode;
     GtkWidget *dns_entry;
     GtkWidget *hip_check;
@@ -94,6 +98,16 @@ combo_changed_cb (GtkComboBox *combo, gpointer user_data)
 }
 
 static void
+mtu_changed_cb (GtkSpinButton *spin, gpointer user_data)
+{
+    NMGpclientEditor *self = NM_GPCLIENT_EDITOR (user_data);
+
+    /* Set after load: the value was set before this handler was connected */
+    self->mtu_touched = TRUE;
+    g_signal_emit_by_name (self, "changed");
+}
+
+static void
 timeout_changed_cb (GtkSpinButton *spin, gpointer user_data)
 {
     NMGpclientEditor *self = NM_GPCLIENT_EDITOR (user_data);
@@ -120,12 +134,13 @@ auth_mode_changed_cb (GtkComboBox *combo, gpointer user_data)
 static GtkWidget *
 build_ui (NMGpclientEditor *self)
 {
-    GtkWidget *grid, *label, *timeout_box, *timeout_hint;
+    GtkWidget *grid, *label, *timeout_box, *timeout_hint, *mtu_box, *mtu_hint;
     NMSettingVpn *s_vpn;
     const char *value;
     gboolean is_new;
     guint stored;
     int auth_index;
+    int shown;
     int row = 0;
 
     grid = gtk_grid_new ();
@@ -327,6 +342,34 @@ build_ui (NMGpclientEditor *self)
     gtk_box_append (GTK_BOX (timeout_box), timeout_hint);
     gtk_grid_attach (GTK_GRID (grid), timeout_box, 1, row++, 1, 1);
 
+    /* Tunnel MTU (vpn.data "mtu") */
+    label = gtk_label_new ("MTU:");
+    gtk_widget_set_halign (label, GTK_ALIGN_START);
+    gtk_grid_attach (GTK_GRID (grid), label, 0, row, 1, 1);
+
+    mtu_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+    self->mtu_spin = gtk_spin_button_new_with_range (0, MTU_MAX, 1);
+    gtk_spin_button_set_digits (GTK_SPIN_BUTTON (self->mtu_spin), 0);
+    gtk_spin_button_set_numeric (GTK_SPIN_BUTTON (self->mtu_spin), TRUE);
+    gtk_widget_set_hexpand (self->mtu_spin, TRUE);
+    gtk_widget_set_tooltip_text (self->mtu_spin,
+        "Maximum size of a packet in the tunnel.\n"
+        "0 = Automatic. Lowering it (for example to 1300-1400) may help when the "
+        "tunnel falls back from ESP to HTTPS with \"Message too long\".\n"
+        "It has an effect only when the gateway sends no MTU of its own. "
+        "Values from 1 to 575 are saved as 576, the lowest value that is used.");
+    gtk_widget_set_name (self->mtu_spin, "mtu_spin");
+    g_free (self->mtu_stored);
+    self->mtu_stored = g_strdup (s_vpn ? nm_setting_vpn_get_data_item (s_vpn, "mtu") : NULL);
+    self->mtu_touched = FALSE;
+    shown = nm_gpclient_mtu_parse (self->mtu_stored);
+    gtk_spin_button_set_value (GTK_SPIN_BUTTON (self->mtu_spin), shown > 0 ? shown : 0);
+    g_signal_connect (self->mtu_spin, "value-changed", G_CALLBACK (mtu_changed_cb), self);
+    gtk_box_append (GTK_BOX (mtu_box), self->mtu_spin);
+    mtu_hint = gtk_label_new ("bytes (0 = Automatic)");
+    gtk_box_append (GTK_BOX (mtu_box), mtu_hint);
+    gtk_grid_attach (GTK_GRID (grid), mtu_box, 1, row++, 1, 1);
+
     /* Legacy TLS renegotiation workaround */
     label = gtk_label_new ("Legacy TLS renegotiation:");
     gtk_widget_set_halign (label, GTK_ALIGN_START);
@@ -501,6 +544,25 @@ update_connection (NMVpnEditor *editor,
                   (guint) gtk_spin_button_get_value_as_int (GTK_SPIN_BUTTON (self->timeout_spin)),
                   NULL);
 
+    /* Save the MTU: 0 = automatic (no key), below 576 is saved as 576 */
+    gtk_spin_button_update (GTK_SPIN_BUTTON (self->mtu_spin));
+    {
+        int mtu = gtk_spin_button_get_value_as_int (GTK_SPIN_BUTTON (self->mtu_spin));
+
+        if (!self->mtu_touched && nm_gpclient_mtu_parse (self->mtu_stored) < 0) {
+            /* The stored value is invalid, so the spin button shows 0, and the
+             * user did not touch it: keep the text instead of losing it */
+            nm_setting_vpn_add_data_item (s_vpn, "mtu", self->mtu_stored);
+        } else if (mtu <= 0) {
+            nm_setting_vpn_remove_data_item (s_vpn, "mtu");
+        } else {
+            char *mtu_text = g_strdup_printf ("%d", CLAMP (mtu, MTU_MIN, MTU_MAX));
+
+            nm_setting_vpn_add_data_item (s_vpn, "mtu", mtu_text);
+            g_free (mtu_text);
+        }
+    }
+
     /* Save DNS */
     str = gtk_editable_get_text (GTK_EDITABLE (self->dns_entry));
     if (str && *str)
@@ -563,6 +625,8 @@ nm_gpclient_editor_dispose (GObject *object)
         g_object_unref (self->widget);
         self->widget = NULL;
     }
+
+    g_clear_pointer (&self->mtu_stored, g_free);
 
     if (self->connection) {
         g_object_unref (self->connection);

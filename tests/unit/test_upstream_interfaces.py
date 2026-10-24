@@ -129,6 +129,26 @@ def test_start_gpclient_leaves_out_optional_flags_by_default(start_env):
     assert "GP_BROWSER" not in dumped["env"]
 
 
+def test_start_gpclient_passes_the_mtu_before_the_browser(start_env):
+    start_env.plugin.mtu = 1300
+
+    assert start_env.start() is True  # _start_gpclient
+
+    argv = json.loads(start_env.dump.read_text())["argv"]
+    assert argv[argv.index("--mtu") + 1] == "1300"
+    browser = next(a for a in argv if a.startswith("--browser="))
+    assert argv.index("connect") < argv.index("--mtu") < argv.index(browser)
+
+
+@pytest.mark.parametrize("mtu", [None, 0])
+def test_start_gpclient_leaves_out_the_mtu_when_automatic(start_env, mtu):
+    start_env.plugin.mtu = mtu
+
+    assert start_env.start() is True  # _start_gpclient
+
+    assert "--mtu" not in json.loads(start_env.dump.read_text())["argv"]
+
+
 def test_start_gpclient_without_a_real_user_sets_no_session_env(start_env):
     # root with no desktop user: no SUDO_UID and no session variables
     start_env.plugin._get_real_user = lambda: (0, "root", "/root")

@@ -46,6 +46,46 @@ TIMEOUT_CASES = [
      "steps": [("auth", 0)], "shown": TIMEOUT, "saved": TIMEOUT},
 ]
 
+# Name of the MTU spin button (gtk_widget_set_name in the GTK editors); the
+# editors save less than MTU_MIN as MTU_MIN, 0 = automatic (no key).
+MTU_SPIN_NAME = "mtu_spin"
+MTU_MAX = 1500
+MTU_MIN = 576
+
+# Save scenarios of the MTU (vpn.data mtu). Each case opens the editor for an
+# existing profile with "vpn_data", sets the spin button to each value of
+# "spins" in turn (none = untouched), then compares the spin button (shown) and the vpn.data mtu that
+# update_connection() writes (saved, None = no key) with the expectation.
+def _mtu_case(name, stored, spin, shown, saved):
+    data = {"gateway": GATEWAY}
+    if stored is not None:
+        data["mtu"] = stored
+    spins = [] if spin is None else spin if isinstance(spin, list) else [spin]
+    return {"name": "mtu: " + name, "vpn_data": data, "spins": spins, "shown": shown, "saved": saved}
+
+
+MTU_CASES = [
+    _mtu_case("stored value", "1300", None, 1300, "1300"),
+    _mtu_case("not stored", None, None, 0, None),
+    _mtu_case("stored with leading zero", "01300", None, 1300, "1300"),
+    _mtu_case("stored 500 is shown as 576", "500", None, 576, "576"),
+    _mtu_case("stored 00 is automatic", "00", None, 0, None),
+    # A stored value the spin button cannot show (it shows 0) is kept while the
+    # spin button is untouched. Setting 0 changes nothing (it is already 0), so
+    # that keeps the key too.
+    _mtu_case("stored 1501 is kept when untouched", "1501", None, 0, "1501"),
+    _mtu_case("stored 1600 is kept when untouched", "1600", None, 0, "1600"),
+    _mtu_case("stored abc is kept when untouched", "abc", None, 0, "abc"),
+    _mtu_case("stored 1600, 0 set: the key stays", "1600", 0, 0, "1600"),
+    _mtu_case("stored 1600 replaced by 1300", "1600", 1300, 1300, "1300"),
+    # touched: the user set a value and then 0, so 0 means automatic now
+    _mtu_case("stored 1600, 1300 then 0: the key is removed", "1600", [1300, 0], 0, None),
+    _mtu_case("stored abc replaced by 400", "abc", 400, 400, "576"),
+    _mtu_case("0 removes the key", "1300", 0, 0, None),
+    _mtu_case("400 is saved as 576", None, 400, 400, "576"),
+    _mtu_case("1400 is saved", None, 1400, 1400, "1400"),
+]
+
 
 def parse_name_file(text):
     """{"service", "plugin", "name"} of a NetworkManager VPN .name file.
@@ -153,6 +193,23 @@ def check_timeout_results(results):
             problems.append(f"{name}: the connect timeout shown is {shown}, expected {case['shown']}")
         if saved != case["saved"]:
             problems.append(f"{name}: the connect timeout saved is {saved}, expected {case['saved']}")
+    return problems
+
+
+def check_mtu_results(results):
+    """The problems of the MTU scenarios (empty list = fine): `results` maps the
+    name of a MTU_CASES entry to (shown, saved)."""
+    problems = []
+    for case in MTU_CASES:
+        name = case["name"]
+        if name not in results:
+            problems.append(f"MTU case {name!r} did not run")
+            continue
+        shown, saved = results[name]
+        if shown != case["shown"]:
+            problems.append(f"{name}: the MTU shown is {shown}, expected {case['shown']}")
+        if saved != case["saved"]:
+            problems.append(f"{name}: the MTU saved is {saved!r}, expected {case['saved']!r}")
     return problems
 
 
