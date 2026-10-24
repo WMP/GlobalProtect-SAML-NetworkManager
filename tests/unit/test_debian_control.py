@@ -1009,7 +1009,15 @@ class TestRulesPlasmaOnly:
         assert result.returncode == 0, result.stderr
         assert log == ["fakemake init-submodules", "fakemake gnome-plugins",
                        "cmake .. -DQT_MAJOR_VERSION=%s" % QT[name][-1], "fakemake ",
-                       "cargo build --release --bin gpclient --bin gpauth --bin gpservice"]
+                       "cargo build --release --bin gpclient --bin gpauth"]
+
+    def test_gpservice_is_neither_built_nor_installed(self, tmp_path):
+        # nothing in this project starts gpservice: the callback path is gpclient launch-gui -> gpauth
+        result, log = run_rules(tmp_path, read("control.ubuntu24.04"), "override_dh_auto_build")
+
+        assert result.returncode == 0, result.stderr
+        assert not any("gpservice" in line for line in log)
+        assert "gpservice" not in RULES
 
     @pytest.mark.parametrize("name", [NEON, "control.ubuntu24.04", "control.ubuntu26.04"])
     @pytest.mark.parametrize("extra", [PLASMA, PLASMA6])

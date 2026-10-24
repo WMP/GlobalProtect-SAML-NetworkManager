@@ -167,8 +167,7 @@ nm-connection-editor
 
 /usr/bin/
 ├── gpclient    # VPN client
-├── gpauth      # SAML auth handler
-└── gpservice   # Background service
+└── gpauth      # SAML auth handler
 ```
 
 ### Configuration Storage

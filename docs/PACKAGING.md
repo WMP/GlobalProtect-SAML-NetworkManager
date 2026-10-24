@@ -8,7 +8,7 @@ This project builds **3 separate Debian packages** to support different desktop 
 ┌─────────────────────────────────────────┐
 │  network-manager-gpclient (BASE)        │
 │  ├── Python VPN service                 │
-│  ├── gpclient, gpauth, gpservice        │
+│  ├── gpclient, gpauth                   │
 │  ├── Configuration files                │
 │  └── Helper scripts (edge-wrapper)      │
 └─────────────────────────────────────────┘
@@ -34,7 +34,7 @@ Contents:
 - `/usr/lib/NetworkManager/nm-gpclient-service` - Python VPN service
 - `/usr/lib/NetworkManager/VPN/nm-gpclient-service.name` - Service descriptor
 - `/usr/libexec/gpclient/edge-wrapper` - Browser wrapper script
-- `/usr/bin/gpclient`, `/usr/bin/gpauth`, `/usr/bin/gpservice` - VPN client binaries
+- `/usr/bin/gpclient`, `/usr/bin/gpauth` - VPN client binaries
 - D-Bus and systemd configuration files
 
 Dependencies:

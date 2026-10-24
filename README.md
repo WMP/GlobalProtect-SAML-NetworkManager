@@ -432,7 +432,6 @@ See [debian/copyright](debian/copyright).
 This project uses [GlobalProtect-openconnect](https://github.com/yuezk/GlobalProtect-openconnect) by yuezk as a submodule. From that project we build and include:
 - `gpclient` - VPN client binary that handles the actual VPN connection
 - `gpauth` - SAML authentication handler
-- `gpservice` - Background service for VPN management
 
 The NetworkManager integration (plugins for GNOME/Plasma, Python service, D-Bus configuration) is original work in this repository.
 

@@ -59,11 +59,11 @@ endif
 	cd plugins/plasma/build && cmake .. -DQT_MAJOR_VERSION=$(PLASMA_QT_MAJOR) && $(MAKE)
 
 ifneq ($(HAS_CORE),)
-	# Build Rust binaries (gpclient, gpauth, and gpservice)
+	# Build Rust binaries (gpclient and gpauth)
 	# Cargo will reuse compiled dependencies from target cache volume
-	# Only local crates (gpauth, gpclient, gpservice, gpapi, common, openconnect) will be recompiled
-	@echo "Building gpclient, gpauth, and gpservice (reusing cached dependencies)..."
-	cd external/GlobalProtect-openconnect && cargo build --release --bin gpclient --bin gpauth --bin gpservice
+	# Only local crates (gpauth, gpclient, gpapi, common, openconnect) will be recompiled
+	@echo "Building gpclient and gpauth (reusing cached dependencies)..."
+	cd external/GlobalProtect-openconnect && cargo build --release --bin gpclient --bin gpauth
 endif
 
 override_dh_auto_install:
@@ -137,13 +137,11 @@ ifneq ($(HAS_CORE),)
 	ln -sf /usr/lib/NetworkManager/nm-gpclient-service \
 		$(CURDIR)/debian/network-manager-gpclient/usr/libexec/NetworkManager/gpclient-nm-service
 
-	# Install Rust binaries (gpclient, gpauth, and gpservice)
+	# Install Rust binaries (gpclient and gpauth)
 	install -D -m 755 external/GlobalProtect-openconnect/target/release/gpclient \
 		$(CURDIR)/debian/network-manager-gpclient/usr/bin/gpclient
 	install -D -m 755 external/GlobalProtect-openconnect/target/release/gpauth \
 		$(CURDIR)/debian/network-manager-gpclient/usr/bin/gpauth
-	install -D -m 755 external/GlobalProtect-openconnect/target/release/gpservice \
-		$(CURDIR)/debian/network-manager-gpclient/usr/bin/gpservice
 
 	# Install .desktop file for URL handler registration (globalprotectcallback://)
 	install -D -m 644 external/GlobalProtect-openconnect/packaging/files/usr/share/applications/gpgui.desktop \
