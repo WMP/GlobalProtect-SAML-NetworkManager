@@ -498,8 +498,8 @@ class TestCheckTunnelLoopPayload:
         assert loop.exec.calls == [("ip", "route", "show", "dev", "tun0")]
 
         names = [name for name, _ in dbus_signals]
-        assert names == ["Ip4Config", "StateChanged"]
-        assert dbus_signals[1][1] == service_module.NM_VPN_SERVICE_STATE_STARTED
+        assert names == ["Config", "Ip4Config", "StateChanged"]
+        assert dbus_signals[2][1] == service_module.NM_VPN_SERVICE_STATE_STARTED
         assert loop.plugin._tunnel_up is True
         assert loop.persisted == ["gateways", "openssl"]
 
@@ -616,6 +616,86 @@ class TestCheckTunnelLoopPayload:
             "au",
             [service_module.ipv4_to_nm_uint32("10.9.9.9")],
         )
+
+
+def _config(signals):
+    for name, payload in signals:
+        if name == "Config":
+            return payload
+    return None
+
+
+class TestCheckTunnelLoopGenericConfig:
+    """The Config signal (new-style plugin), sent right before Ip4Config"""
+
+    def test_config_is_sent_once_before_ip4config(
+        self, make_loop, service_module, dbus_signals
+    ):
+        loop = make_loop(route_out=b"10.0.0.0/8 via 10.8.0.1\n")
+        assert loop.run() is True
+
+        names = [name for name, _ in dbus_signals]
+        assert names.count("Config") == 1
+        assert names.index("Config") + 1 == names.index("Ip4Config")
+        config = _config(dbus_signals)
+        assert config == {
+            "tundev": ("s", "tun0"),
+            "gateway": _ip4_config(dbus_signals)["gateway"],
+            "has-ip4": ("b", True),
+            "has-ip6": ("b", False),
+        }
+        assert config["gateway"] == ("u", service_module.ipv4_to_nm_uint32("10.8.0.1"))
+
+    def test_mtu_is_sent_when_the_profile_sets_it(self, make_loop, dbus_signals):
+        loop = make_loop()
+        loop.plugin.mtu = 1400
+        assert loop.run() is True
+        assert _config(dbus_signals)["mtu"] == ("u", 1400)
+
+    @pytest.mark.parametrize("mtu", [None, 0])
+    def test_no_mtu_when_the_profile_leaves_it_unset(
+        self, make_loop, dbus_signals, mtu
+    ):
+        loop = make_loop()
+        loop.plugin.mtu = mtu
+        assert loop.run() is True
+        assert "mtu" not in _config(dbus_signals)
+
+    @pytest.mark.parametrize("text", ["abc", "9999", "-5", "12x", "1.5"])
+    def test_no_mtu_when_the_profile_value_is_invalid(
+        self, service_module, text
+    ):
+        # parse_mtu rejects it, so the service stores None
+        assert service_module.parse_mtu(text) is None
+        plugin = service_module.GpclientVPNPlugin()
+        plugin.mtu = service_module.parse_mtu(text) or None
+        assert "mtu" not in plugin._build_generic_config("tun0", 1)
+
+    def test_gateway_that_cannot_be_converted_is_left_out(
+        self, make_loop, dbus_signals
+    ):
+        loop = make_loop(route_out=b"10.1.0.0/16 via not-an-ip\n")
+        assert loop.run() is True
+        assert "gateway" not in _ip4_config(dbus_signals)
+        config = _config(dbus_signals)
+        assert "gateway" not in config
+        assert config["tundev"] == ("s", "tun0")
+
+    def test_zero_gateway_is_kept(self, service_module):
+        plugin = service_module.GpclientVPNPlugin()
+        assert plugin._build_generic_config("tun0", 0)["gateway"] == ("u", 0)
+        assert "gateway" not in plugin._build_generic_config("tun0", None)
+
+    @pytest.mark.parametrize("ifaces", [[], ["tun0"]])
+    def test_no_config_while_the_tunnel_is_not_up(
+        self, make_loop, dbus_signals, ifaces
+    ):
+        loop = make_loop(ifaces=ifaces)
+        if ifaces:
+            loop.ips["tun0"] = (None, 0)
+        assert loop.run(timeout=0.2) is False
+        assert _config(dbus_signals) is None
+        assert dbus_signals == []
 
 
 class TestCheckTunnelLoopSelection:

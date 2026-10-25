@@ -3929,6 +3929,22 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         if not os.path.exists(f"{NET_SYSFS_PATH}/gpd0"):
             logger.info("Stale gpd0 interface removed")
 
+    def _build_generic_config(
+        self, iface: str, gateway_int: Optional[int]
+    ) -> Dict[str, Tuple[str, Any]]:
+        """The a{sv} dict of the Config signal (new-style plugin).
+
+        gateway_int is the external gateway as the uint32 that Ip4Config
+        carries, or None when it could not be converted."""
+        generic: Dict[str, Tuple[str, Any]] = {"tundev": ("s", iface)}
+        if gateway_int is not None:
+            generic["gateway"] = ("u", gateway_int)
+        generic["has-ip4"] = ("b", True)
+        generic["has-ip6"] = ("b", False)
+        if self.mtu:
+            generic["mtu"] = ("u", self.mtu)
+        return generic
+
     async def _check_tunnel_loop(self) -> None:
         """Periodically check for tunnel interface"""
         try:
@@ -4068,6 +4084,7 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
 
                     # Add gateway (required by NetworkManager, even with never-default)
                     # NetworkManager uses never-default to control routing, not plugin
+                    gateway_int = None
                     if gateway:
                         try:
                             gateway_int = ipv4_to_nm_uint32(gateway)
@@ -4104,6 +4121,12 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                     # DNS servers and search domains: the profile's override
                     # and/or what the gateway pushed (issue #15)
                     self._build_dns_config(config, learned_dns)
+
+                    # Emit the generic Config signal first: a new-style
+                    # plugin sends it before Ip4Config
+                    generic_config = self._build_generic_config(iface, gateway_int)
+                    logger.info(f"Config: {generic_config}")
+                    self.Config.emit(generic_config)
 
                     # Emit Ip4Config signal
                     logger.info(f"Ip4Config: {config}")
