@@ -189,38 +189,6 @@ SECRETS_REQUEST_TIMEOUT = 300
 # reacting to half-rendered lines.
 PROMPT_DEBOUNCE_SECONDS = 0.5
 
-# --- Session environment ----------------------------------------------------
-#
-# NetworkManager starts this service with a bare environment, so gpauth - and
-# through it the SAML browser - has no way to reach the display server unless
-# we import these from the running session. Passing only DISPLAY=:0 (what we
-# used to do) is wrong on Wayland: the browser silently failed to open a window
-# for every browser except the wrapped Edge, which reconstructs the session
-# environment itself (issue #7).
-SESSION_ENV_KEYS = (
-    "DISPLAY",
-    "WAYLAND_DISPLAY",
-    "XAUTHORITY",
-    "XDG_RUNTIME_DIR",
-    "DBUS_SESSION_BUS_ADDRESS",
-    "XDG_SESSION_TYPE",
-    "XDG_CURRENT_DESKTOP",
-)
-
-# Processes whose environment describes the graphical session, most specific
-# first ("systemd" is the per-user manager and carries only a subset).
-SESSION_LEADER_PROCESSES = (
-    "gnome-shell",
-    "plasmashell",
-    "gnome-session-binary",
-    "kwin_wayland",
-    "xfce4-session",
-    "cinnamon-session",
-    "mate-session",
-    "sway",
-    "systemd",
-)
-
 # --- Browser resolution -----------------------------------------------------
 #
 # The wrapper fixes up the environment, the profile directory and the window
@@ -2324,132 +2292,12 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
         home = os.environ.get("HOME", f"/home/{username}")
         return uid, username, home
 
-    @staticmethod
-    def _read_proc_environ(pid: str) -> Dict[str, str]:
-        """Parse /proc/<pid>/environ into a dict (empty when unreadable)"""
-        try:
-            # PROC_PATH, not a literal /proc: tests point it at a fake tree
-            with open(f"{PROC_PATH}/{pid}/environ", "rb") as handle:
-                raw = handle.read()
-        except OSError:
-            return {}
-
-        environ = {}
-        for entry in raw.split(b"\0"):
-            if not entry or b"=" not in entry:
-                continue
-            key, _, value = entry.partition(b"=")
-            environ[key.decode("utf-8", errors="replace")] = value.decode(
-                "utf-8", errors="replace"
-            )
-        return environ
-
-    def _scan_session_env(
-        self, real_uid: int, already_found: Dict[str, str]
-    ) -> Dict[str, str]:
-        """Find session variables in any process the user owns.
-
-        Fallback for desktops whose session leader is not in
-        SESSION_LEADER_PROCESSES: the first process that exposes a display wins,
-        and the remaining missing keys are taken from it as well.
-        """
-        found: Dict[str, str] = {}
-
-        try:
-            pids = [entry for entry in os.listdir(PROC_PATH) if entry.isdigit()]
-        except OSError as e:
-            logger.debug(f"Cannot list {PROC_PATH}: {e}")
-            return found
-
-        for pid in pids:
-            try:
-                if os.stat(f"{PROC_PATH}/{pid}").st_uid != real_uid:
-                    continue
-            except OSError:
-                continue
-
-            proc_environ = self._read_proc_environ(pid)
-            if not (proc_environ.get("DISPLAY") or proc_environ.get("WAYLAND_DISPLAY")):
-                continue
-
-            for key in SESSION_ENV_KEYS:
-                if key not in already_found and proc_environ.get(key):
-                    found[key] = proc_environ[key]
-
-            try:
-                with open(f"{PROC_PATH}/{pid}/comm") as handle:
-                    name = handle.read().strip()
-            except OSError:
-                name = "?"
-            logger.info(
-                f"Session display taken from a running process: {name} ({pid})"
-            )
-            break
-
-        return found
-
-    def _get_session_env(self, real_uid: int, real_home: str) -> Dict[str, str]:
-        """Collect the user's graphical session environment.
-
-        NetworkManager starts us without any session context, so the values are
-        read from the processes that own the session (SESSION_LEADER_PROCESSES,
-        most specific first). Only SESSION_ENV_KEYS are taken and the first
-        process that provides a key wins.
-        """
-        session_env: Dict[str, str] = {}
-
-        for process in SESSION_LEADER_PROCESSES:
-            if len(session_env) == len(SESSION_ENV_KEYS):
-                break
-            try:
-                result = subprocess.run(
-                    ["pgrep", "-u", str(real_uid), "-x", process],
-                    capture_output=True,
-                    text=True,
-                    timeout=2,
-                )
-            except Exception as e:
-                logger.debug(f"pgrep for {process} failed: {e}")
-                continue
-            if result.returncode != 0:
-                continue
-
-            for pid in result.stdout.split():
-                proc_environ = self._read_proc_environ(pid)
-                for key in SESSION_ENV_KEYS:
-                    if key not in session_env and proc_environ.get(key):
-                        session_env[key] = proc_environ[key]
-                        logger.debug(f"Session {key} taken from {process} ({pid})")
-
-        # No display from the known session leaders - the user may run a desktop
-        # we don't have on the list, so look at everything they have running
-        # (issue #2: only XDG_* keys were found, and the browser had no display)
-        if "DISPLAY" not in session_env and "WAYLAND_DISPLAY" not in session_env:
-            session_env.update(self._scan_session_env(real_uid, session_env))
-
-        # Fallbacks that don't need a session process
-        runtime_dir = session_env.get("XDG_RUNTIME_DIR") or f"/run/user/{real_uid}"
-        if os.path.isdir(runtime_dir):
-            session_env["XDG_RUNTIME_DIR"] = runtime_dir
-            bus_path = f"{runtime_dir}/bus"
-            if "DBUS_SESSION_BUS_ADDRESS" not in session_env and os.path.exists(
-                bus_path
-            ):
-                session_env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus_path}"
-
-        if "XAUTHORITY" not in session_env:
-            xauthority = f"{real_home}/.Xauthority"
-            if os.path.exists(xauthority):
-                session_env["XAUTHORITY"] = xauthority
-
-        return session_env
-
     async def _start_gpclient(self) -> bool:
         """Start gpclient process"""
         try:
             # Get real user first
             # (blocking loginctl calls: off the event loop)
-            real_uid, real_user, real_home = await asyncio.to_thread(
+            real_uid, real_user, _ = await asyncio.to_thread(
                 self._get_real_user
             )
             logger.info(f"Will run gpclient as user: {real_user}")
@@ -2509,19 +2357,13 @@ class GpclientVPNPlugin(DbusInterfaceCommonAsync, interface_name=NM_DBUS_INTERFA
                 env["SUDO_UID"] = str(real_uid)
                 env["SUDO_USER"] = real_user
 
-                # Import the user's graphical session environment so gpauth can
-                # actually open the SAML browser (issue #7)
-                session_env = self._get_session_env(real_uid, real_home)
-                env.update(session_env)
+                # No session environment here: gpclient starts gpauth as this
+                # user (SUDO_UID) and builds DISPLAY, XDG_RUNTIME_DIR, the
+                # D-Bus address and the rest itself (gpapi desktop_session_env)
                 logger.info(
-                    f"Environment: SUDO_UID={real_uid}, session keys: "
-                    f"{sorted(session_env)}"
+                    f"Environment: SUDO_UID={real_uid}; the session environment "
+                    "comes from gpclient/gpauth"
                 )
-                if "DISPLAY" not in session_env and "WAYLAND_DISPLAY" not in session_env:
-                    logger.warning(
-                        "No DISPLAY/WAYLAND_DISPLAY found in the user's session - "
-                        "the authentication browser may fail to open a window"
-                    )
 
             # Tell the wrapper which browser to launch
             if self.browser_target:

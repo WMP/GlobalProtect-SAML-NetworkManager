@@ -210,10 +210,14 @@
         "cli-user",
         "cli-browser",
         "sudo-uid",
+        "code-into-non-root",
+        "code-desktop-session-env",
         "callback-handler-desktop"
       ],
       "tests": [
         "tests/unit/test_upstream_interfaces.py::test_start_gpclient_passes_flags_and_environment",
+        "tests/unit/test_upstream_interfaces.py::test_start_gpclient_does_not_copy_the_session_environment",
+        "tests/unit/test_upstream_interfaces.py::test_start_gpclient_does_not_read_the_environment_of_user_processes",
         "tests/unit/test_upstream_interfaces.py::test_start_gpclient_passes_the_mtu_before_the_browser",
         "tests/unit/test_upstream_interfaces.py::test_start_gpclient_leaves_out_the_mtu_when_automatic",
         "tests/unit/test_upstream_interfaces.py::test_start_gpclient_leaves_out_optional_flags_by_default",

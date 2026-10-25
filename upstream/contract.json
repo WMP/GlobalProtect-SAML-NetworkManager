@@ -130,6 +130,24 @@
       "used_by": "service/nm-gpclient-service.py: SUDO_UID in the gpclient environment"
     },
     {
+      "id": "code-into-non-root",
+      "kind": "block",
+      "role": "code",
+      "path": "crates/gpapi/src/process/command_traits.rs",
+      "start": "fn into_non_root(mut self)",
+      "sha256": "e8906113bb8c754dd5dded9769ae89acc24a39394895a2258a990118e818dcb0",
+      "used_by": "service/nm-gpclient-service.py: SUDO_UID in the gpclient environment, no session environment copied into gpclient"
+    },
+    {
+      "id": "code-desktop-session-env",
+      "kind": "block",
+      "role": "code",
+      "path": "crates/gpapi/src/process/desktop_session_env.rs",
+      "start": "fn collect(user_id: u32)",
+      "sha256": "cb08c6f99e06dde8035ad0c28ce1483f26e0fa235ecc4b30482f71ed9f186a7b",
+      "used_by": "service/nm-gpclient-service.py: SUDO_UID in the gpclient environment, no session environment copied into gpclient"
+    },
+    {
       "id": "callback-handler-desktop",
       "kind": "anchor",
       "path": "crates/auth/src/callback.rs",

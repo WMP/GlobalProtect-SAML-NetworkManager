@@ -57,10 +57,14 @@ Supports both X11 (`DISPLAY=:0`) and Wayland (`WAYLAND_DISPLAY=wayland-0`); the
 Chromium `--ozone-platform=wayland` flags are only added on an actual Wayland
 session, so X11 sessions are no longer broken by them.
 
-The service does the same thing on its side (`_get_session_env()`), so gpauth and
-browsers launched without this wrapper get a usable environment too. Passing only
-`DISPLAY=:0` was why `browser=firefox` opened no window at all on Wayland
-([#7](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/issues/7)).
+The service does not pass the session environment to gpclient. gpclient starts
+gpauth as the desktop user (it finds the user by `SUDO_UID`) and rebuilds the
+session environment itself from the user's own processes, with defaults for
+`XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` (upstream
+`crates/gpapi/src/process/desktop_session_env.rs`). Passing only `DISPLAY=:0`
+was why `browser=firefox` opened no window at all on Wayland
+([#7](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/issues/7)); gpauth now
+gets the full environment from upstream.
 
 ### 2. Sandbox Workaround (ProtectHome)
 

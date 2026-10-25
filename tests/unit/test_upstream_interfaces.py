@@ -53,10 +53,6 @@ def start_env(service_module, monkeypatch, tmp_path):
     plugin.gateway = "portal.example.com"
     plugin.browser = "default"
     plugin._get_real_user = lambda: (4321, "alice", "/home/alice")
-    plugin._get_session_env = lambda uid, home: {
-        "DISPLAY": ":7",
-        "XDG_RUNTIME_DIR": "/run/user/4321",
-    }
 
     async def no_monitor():
         pass
@@ -114,8 +110,6 @@ def test_start_gpclient_passes_flags_and_environment(start_env):
     env = dumped["env"]
     assert env["SUDO_UID"] == "4321"
     assert env["SUDO_USER"] == "alice"
-    assert env["DISPLAY"] == ":7"
-    assert env["XDG_RUNTIME_DIR"] == "/run/user/4321"
     assert env["GP_BROWSER"] == "/usr/bin/firefox"
     assert pty_seen and isinstance(pty_seen[0], int)  # the PTY master was set
 
@@ -158,6 +152,86 @@ def test_start_gpclient_without_a_real_user_sets_no_session_env(start_env):
     env = json.loads(start_env.dump.read_text())["env"]
     for name in ("SUDO_UID", "SUDO_USER", "DISPLAY"):
         assert name not in env
+
+
+# gpclient starts gpauth as the desktop user and builds the session environment
+# itself (gpapi desktop_session_env::apply, from /proc/<pid>/environ of the
+# user's own processes). The service must not copy it into the root process.
+SESSION_KEYS = (
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "XAUTHORITY",
+    "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "XDG_SESSION_TYPE",
+    "XDG_CURRENT_DESKTOP",
+)
+
+
+@pytest.fixture
+def user_session(service_module, start_env, monkeypatch, tmp_path):
+    """A desktop session in a fake /proc whose processes expose every session
+    key. Reading any environ file from it fails the test."""
+    proc = tmp_path / "proc"
+    (proc / "777").mkdir(parents=True)
+    (proc / "777" / "comm").write_text("gnome-shell\n")
+    (proc / "777" / "environ").write_bytes(
+        b"".join(f"{key}=from-session-{key}".encode() + b"\0" for key in SESSION_KEYS)
+    )
+    monkeypatch.setattr(service_module, "PROC_PATH", str(proc))
+    for key in SESSION_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    # pgrep finds the session leader, as it would on a real desktop
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "777\n", ""),
+    )
+
+    reads = []
+    real_open = open
+
+    def guarded_open(file, *args, **kwargs):
+        if str(file).startswith(str(proc)):
+            reads.append(str(file))
+            raise AssertionError(f"the service must not read {file}")
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", guarded_open)
+    start_env.reads = reads
+    return start_env
+
+
+def test_start_gpclient_does_not_copy_the_session_environment(user_session):
+    assert user_session.start() is True  # _start_gpclient
+
+    env = json.loads(user_session.dump.read_text())["env"]
+    for key in SESSION_KEYS:
+        assert key not in env
+    assert env["SUDO_UID"] == "4321"
+    assert env["SUDO_USER"] == "alice"
+
+
+def test_start_gpclient_does_not_read_the_environment_of_user_processes(
+    user_session,
+):
+    assert user_session.start() is True  # _start_gpclient
+
+    assert user_session.reads == []
+    env = json.loads(user_session.dump.read_text())["env"]
+    # Only the user ID tells gpclient whose session to use
+    assert env["SUDO_UID"] == "4321"
+
+
+def test_start_gpclient_keeps_the_service_own_environment(user_session, monkeypatch):
+    # What the service itself got from its parent is not removed
+    monkeypatch.setenv("DISPLAY", ":from-service")
+
+    assert user_session.start() is True  # _start_gpclient
+
+    env = json.loads(user_session.dump.read_text())["env"]
+    assert env["DISPLAY"] == ":from-service"
+    assert "WAYLAND_DISPLAY" not in env
 
 
 def test_start_gpclient_looks_up_the_user_off_the_event_loop(start_env):

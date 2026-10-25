@@ -392,7 +392,7 @@ def start_env(service_module, monkeypatch, tmp_path):
 
     monkeypatch.setattr(service_module.subprocess, "run", fake_run)
 
-    def run(uid=1000, session_env=None, **settings):
+    def run(uid=1000, **settings):
         plugin = _plugin(service_module)
         plugin.gateway = "portal.example.com"
         plugin.browser = "/bin/true"
@@ -401,12 +401,6 @@ def start_env(service_module, monkeypatch, tmp_path):
         monkeypatch.setattr(
             plugin, "_get_real_user", lambda: (uid, "alice", str(tmp_path))
         )
-
-        def session(_uid, _home):
-            assert uid > 0, "no session lookup for root"
-            return dict(session_env or {})
-
-        monkeypatch.setattr(plugin, "_get_session_env", session)
 
         async def go():
             assert await plugin._start_gpclient()
@@ -428,27 +422,8 @@ class TestStartGpclient:
         assert not [c for c in start_env.subprocess_calls if "pkill" in c]
         assert gpauth_signals == []
 
-    @pytest.mark.parametrize(
-        "session_env, warns",
-        [
-            ({}, True),
-            ({"XDG_RUNTIME_DIR": "/run/user/1000"}, True),
-            ({"DISPLAY": ":0"}, False),
-            ({"WAYLAND_DISPLAY": "wayland-0"}, False),
-        ],
-    )
-    def test_warns_when_the_session_has_no_display(
-        self, service_module, start_env, caplog, session_env, warns
-    ):
-        with caplog.at_level(logging.INFO, logger=service_module.logger.name):
-            seen = start_env(uid=1000, session_env=session_env)
-        text = _log_text(caplog, service_module, logging.WARNING)
-        assert ("No DISPLAY/WAYLAND_DISPLAY found" in text) is warns
-        assert seen["env"]["SUDO_UID"] == "1000"
-        assert seen["env"]["SUDO_USER"] == "alice"
-
     def test_root_session_gets_no_user_environment(self, start_env):
-        seen = start_env(uid=0)  # the stub asserts no session lookup happens
+        seen = start_env(uid=0)
         assert seen["env"]["SUDO_UID"] is None
         assert seen["env"]["SUDO_USER"] is None
 

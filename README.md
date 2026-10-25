@@ -430,10 +430,11 @@ grep -E "done:|WARNING|ERROR" /tmp/edge-wrapper-$(id -u)/wrapper.log
 GP_BROWSER=firefox /usr/libexec/gpclient/browser-wrapper "https://example.com"
 ```
 
-The service log shows which session variables it found for the browser:
+The service log shows which user gets the browser. gpclient builds the session
+environment of gpauth itself, so the service does not log it:
 
 ```bash
-sudo journalctl -u nm-gpclient | grep "session keys"
+sudo journalctl -u nm-gpclient | grep "Environment: SUDO_UID"
 ```
 
 More in [docs/EDGE_WRAPPER.md](docs/EDGE_WRAPPER.md#troubleshooting).
