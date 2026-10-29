@@ -1,3 +1,101 @@
+network-manager-gpclient (2.0.0) unstable; urgency=medium
+
+  * RPM packages for Fedora 43, 44 and 45, RHEL/AlmaLinux/Rocky 10 and
+    openSUSE Leap 16.0 and Tumbleweed, for x86_64 and aarch64, in a signed
+    RPM repository next to the apt repository (dnf and zypper). The SELinux
+    module for Fedora and EL is included
+  * Support for Ubuntu 24.10 was dropped (it is end of life): no new
+    packages are built for it. Supported Ubuntu releases: 22.04, 24.04 and
+    26.04, on amd64 and arm64. The packages already published for 24.10 stay
+    in the apt repository
+  * New setting nm-routing (experimental): NetworkManager sets the tunnel's
+    routes, DNS and default route from what the gateway sends, instead of
+    vpnc-script. Set it in the GNOME and Plasma editors
+  * Translations of the GNOME editors, the authentication dialog and the
+    Plasma editor into 36 languages. The translations are machine-made and
+    no human translator has reviewed them. Corrections are welcome: see
+    docs/TRANSLATIONS.md
+  * SAML login in the authentication dialog (vpn.data saml-auth=dialog,
+    closes #125): the dialog starts gpauth in your desktop session and hands
+    the result to gpclient. New settings for a client certificate (usercert,
+    userkey, cert-pass; closes #134) and a custom HIP script (hip-script;
+    closes #65), all in the editors with a file chooser. The Plasma
+    authentication dialog supports interactive logins (thanks to PR #33)
+  * Password and passphrase fields in the editors have a storage menu (this
+    user only, all users, ask every time), and the Plasma editor uses
+    plasma-nm's own password field. The authentication dialog also works in
+    GNOME Shell and with nmcli --ask. The service no longer changes the
+    profile while NetworkManager can still ask for secrets (closes #120)
+  * New tunnel MTU setting (vpn.data mtu) and a connect timeout field
+    (vpn.timeout) in the editors
+  * Import and export of connections as NetworkManager keyfiles in the GNOME
+    and Plasma editors, and with nmcli connection import/export
+  * The GNOME and Plasma editors check the fields with one shared rule file
+    (a DNS entry that is not an IP address is refused); the GTK4 editor
+    requires the gateway (closes #61)
+  * Fix routing and DNS: split-DNS domains are sent to NetworkManager as
+    routing-only domains; the routes that NetworkManager applies
+    are not sent back to it; never-default also drops the IPv6 default
+    route (closes #109); ignore-auto-routes also empties the IPv6 split
+    lists (closes #152); the routing hook also runs on disconnect (closes
+    #155); and vpnc-script's disconnect runs after gpclient had to be killed
+    (closes #162). The IPv4 address, gateway and routes are sent to
+    NetworkManager in the right byte order, and the gateway is the VPN
+    server's address
+  * IPv6: a tunnel with an IPv6 address gets an Ip6Config, an IPv6-only
+    tunnel is supported with ipv6.method auto, and an IPv6 VPN server
+    address is accepted. An IPv4 tunnel fails when ipv4.method is not auto
+    (closes #132)
+  * The service reports the tunnel when the vpnc hook says it is up, not by
+    polling, and names the tunnel gp-<uuid8>. gpclient output is read from
+    its JSON log records, so other text cannot be taken for a prompt. The
+    service tracks the VPN state, reports a silent gpclient exit,
+    stops only its own gpclient and gpauth, and no longer fails when a
+    Disconnect arrives during the OpenSSL retry
+  * Gateway handling: gpclient gets --gateway for a gateway picked in the
+    editor, and a new SAML login runs before the retry without --gateway
+    (closes #138). When gpclient prints DNS settings only in its log, the
+    service reads them as a fallback (closes #37)
+  * The service writes the connection profile over NetworkManager's D-Bus
+    API. A one-time code stored alone is dropped, and a blanked one is not
+    sent again at every connection
+  * Security: only root may call the service; profile values stay out of
+    gpclient options; the desktop user is taken from logind, not from the
+    first logged-in user (closes #51); passwords and one-time codes stay out
+    of the log; the desktop session environment is not copied into the root
+    gpclient; the browser profile of the wrapper is in a private directory;
+    a custom HIP script must be root-owned in safe directories; the unit
+    runs with systemd sandboxing and starts on demand; the D-Bus policy is
+    in /usr/share
+  * Fix the SAML browser: a snap Chromium profile works, a failed start is
+    reported, and on KDE the default browser starts
+  * The packages carry gpclient and gpauth 3.2.0 (upstream was 3.1.0 for
+    part of this cycle); gpservice is no longer built or installed (closes
+    #39). The menu entry of gpgui is hidden. The unit is installed in
+    /usr/lib/systemd/system. Ubuntu 22.04: install python3-sdbus with sudo
+    pip3 (closes #30). The postinst and postrm scripts match the running
+    service by its command line (closes #43)
+  * Releases: the version is now native (2.0.0, with no Debian revision).
+    The release build fails when the tag differs from debian/changelog,
+    verifies the checksums and provenance of every release before signing,
+    attests the packages, and adds an SBOM of the Rust dependencies; the apt
+    repository publishes only the newest version of each package (closes
+    #44), has by-hash files and no MD5 or SHA1. The release notes keep the
+    table of downloads. Pull requests get installable test packages that
+    scripts/install-pr-build.sh checks before it installs them
+  * Build and test changes: cargo build --locked everywhere, actions pinned
+    to commit SHAs, CodeQL, zizmor and Scorecard workflows, ruff and mypy,
+    shellcheck of every script, lintian errors fixed, coverage of the
+    service gated in CI, upgrade and end-to-end tests, and a README demo as
+    animated WebP. One Dockerfile builds every Ubuntu release (closes
+    #158). gpclient and gpauth are built with cargo auditable, so the
+    binaries carry their dependency list (closes #159). The package builds
+    use vendored crates and need no network; a workflow checks that two
+    builds give the same packages (closes #160). The openSUSE builds retry
+    a zypper refresh that a stale mirror breaks
+
+ -- WMP <example@example.org>  Thu, 29 Oct 2026 00:09:04 +0000
+
 network-manager-gpclient (1.5.0-1) unstable; urgency=medium
 
   * Fix the wrong gateway being selected from a paged gateway list (closes

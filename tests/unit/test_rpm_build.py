@@ -192,7 +192,9 @@ def good_rpms(version, release, arch="x86_64"):
 
 def top_version():
     top = re.match(r"^\S+ \((\S+)\) ", read("debian/changelog")).group(1)
-    return top.rsplit("-", 1)
+    # A native version (2.0.0) has no revision: the RPM release is 1
+    version, _, revision = top.rpartition("-")
+    return (version, revision) if version else (top, "1")
 
 
 def build(sandbox, *args, env_extra=None):

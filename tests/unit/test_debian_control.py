@@ -1255,7 +1255,9 @@ class TestPostinstLegacyWrapperFiles:
 
 class TestChangelog:
     def top(self):
+        # The entry of 1.5.0, which introduced the Plasma packages (no longer the top entry)
         text = read("changelog")
+        text = text[text.index("network-manager-gpclient (1.5.0-1)"):]
         return text[:text.index("\n -- ")]
 
     def test_the_plasma_package_and_its_qt_are_described(self):
