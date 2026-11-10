@@ -44,7 +44,7 @@ class TestJob:
     def test_the_steps_order_and_the_artifact(self):
         names = re.findall(r"^      - name: (.*)$", job_text("build-arch"), re.M)
 
-        assert names == ["Checkout code", "Vendor the crates", BUILD, VERIFY, ATTEST, UPLOAD, INSTALL]
+        assert names == ["Checkout code", "Vendor the crates", BUILD, VERIFY, ATTEST, UPLOAD, "Upload the PKGBUILD", INSTALL]
         lines = "\n".join(workflow_steps.step_lines(WORKFLOW, UPLOAD)[:10])
         assert "name: arch-x86_64" in lines
         assert "path: output/arch-x86_64/*.pkg.tar.zst" in lines
@@ -305,7 +305,7 @@ class TestRelease:
     def test_sha256sums_has_the_arch_packages_and_keeps_the_tilde_rule(self):
         script = "\n".join(workflow_steps.step_lines(WORKFLOW, "Write SHA256SUMS"))
 
-        assert "sha256sum -- *.deb *.rpm *.pkg.tar.zst > SHA256SUMS" in script
+        assert "sha256sum -- *.deb *.rpm *.pkg.tar.zst PKGBUILD network-manager-gpclient.install > SHA256SUMS" in script
         assert "sed -i 's/~/./g' SHA256SUMS" in script
 
     def test_the_release_is_only_for_tags(self):
@@ -342,3 +342,53 @@ class TestPublish:
         for script in (".github/scripts/build-arch-repo.sh", "arch/build.sh", "arch/container-build.sh",
                        "arch/install-test.sh"):
             assert f"\t{script} " in makefile, script
+
+
+class TestStandalone:
+    def test_the_job_builds_the_user_mode_for_pull_requests_and_the_manual_input(self):
+        job = job_text("build-arch-standalone")
+
+        assert "if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.arch_linux == 'true')" in job
+        assert "runs-on: ubuntu-latest" in job
+        assert "bash arch/standalone-test.sh output/arch-standalone" in job
+        # the script pushes the checkout to a mirror: a full clone with the submodules
+        assert "fetch-depth: 0" in job and "submodules: recursive" in job and "persist-credentials: false" in job
+        # nothing is published or attested from it, and it has no write permissions
+        assert "permissions:" not in job and "upload-artifact" not in job and "attest" not in job
+
+    def test_the_release_does_not_wait_for_it_and_it_is_not_for_tags(self):
+        assert "build-arch-standalone" not in job_text("release")
+        job = job_text("build-arch-standalone")
+        assert "push" not in job.split("steps:")[0]
+
+    @pytest.mark.parametrize("old, new", [
+        ("needs: [build, build-rpm, build-arch, sbom]", "needs: [build, build-rpm, build-arch, build-arch-standalone, sbom]"),
+    ])
+    def test_a_release_that_waits_for_it_is_found(self, old, new):
+        text = workflow_text().replace(old, new, 1)
+        assert "build-arch-standalone" in job_text("release", text)
+
+    def test_the_release_attaches_the_pkgbuild_and_the_hooks_and_lists_them_in_sha256sums(self):
+        job = job_text("release")
+
+        assert "-name PKGBUILD -o -name 'network-manager-gpclient.install'" in job
+        assert "release-files/PKGBUILD" in job and "release-files/network-manager-gpclient.install" in job
+        assert "PKGBUILD network-manager-gpclient.install > SHA256SUMS" in job
+        build = job_text("build-arch")
+        assert "name: pkgbuild-arch" in build and "arch/PKGBUILD" in build and "arch/network-manager-gpclient.install" in build
+        # not matched by the pattern of pr-test-packages.yml for the packages
+        assert not re.fullmatch(r"arch-.*", "pkgbuild-arch")
+
+    def test_every_git_source_of_the_pkgbuild_has_a_mirror_rule_in_the_test_script(self):
+        pkgbuild = open(os.path.join(workflow_steps.WORKFLOWS, "..", "..", "arch", "PKGBUILD"), encoding="utf-8").read()
+        script = open(os.path.join(workflow_steps.WORKFLOWS, "..", "..", "arch", "standalone-test.sh"), encoding="utf-8").read()
+        urls = re.findall(r"git\+(https://\S+?\.git)#", pkgbuild)
+
+        assert len(urls) == 4
+        for url in urls:
+            assert "git+" + url[:-len(".git")] + r"\.git" in script, url
+
+    def test_a_pkgbuild_url_without_a_rule_is_found(self):
+        script = open(os.path.join(workflow_steps.WORKFLOWS, "..", "..", "arch", "standalone-test.sh"), encoding="utf-8").read()
+
+        assert r"git+https://github.com/other/repo\.git" not in script

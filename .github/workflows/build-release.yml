@@ -595,6 +595,17 @@ jobs:
           name: arch-x86_64
           path: output/arch-x86_64/*.pkg.tar.zst
 
+      - name: Upload the PKGBUILD
+        # The release attaches the standalone PKGBUILD of the tag (user mode: `makepkg -si`
+        # after cloning the tag, see docs/ARCH_REPO.md) with its .install file
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pkgbuild-arch
+          path: |
+            arch/PKGBUILD
+            arch/network-manager-gpclient.install
+          if-no-files-found: error
+
       - name: Install test of the Arch Linux packages
         # Not for tags (the only push trigger), like the RPM install test: a
         # network flake in a check must not block a release. Installs the
@@ -603,6 +614,26 @@ jobs:
         if: github.event_name != 'push'
         run: |
           bash arch/build.sh --install-test output/arch-x86_64
+
+  # The user mode of arch/PKGBUILD: plain `makepkg -s`, as after `git clone --branch v<version>`,
+  # with the git sources replaced by local mirrors of this checkout (arch/standalone-test.sh).
+  # Nothing is published and the release does not wait for it.
+  build-arch-standalone:
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.arch_linux == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          # the script pushes the checkout to a local mirror: not a shallow clone
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build and install the packages from the standalone PKGBUILD
+        run: bash arch/standalone-test.sh output/arch-standalone
 
   # One CycloneDX SBOM of the Rust dependencies that gpclient and gpauth are
   # built from (the same Cargo.lock for every package), once per release. It is
@@ -662,7 +693,7 @@ jobs:
           # packages the architecture (network-manager-gpclient-1.4.0-1-x86_64.pkg.tar.zst),
           # so no renaming is needed to keep them unique across all builds.
           mkdir -p release-files
-          find artifacts \( -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.zst' -o -name 'sbom-rust.cdx.json' \) -exec cp {} release-files/ \;
+          find artifacts \( -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.zst' -o -name PKGBUILD -o -name 'network-manager-gpclient.install' -o -name 'sbom-rust.cdx.json' \) -exec cp {} release-files/ \;
           echo "Release files:"
           ls -la release-files/
 
@@ -672,7 +703,7 @@ jobs:
           # the "~" of a version into "." (so `sha256sum -c SHA256SUMS` works in
           # the download directory). publish-apt checks every package against it.
           cd release-files
-          sha256sum -- *.deb *.rpm *.pkg.tar.zst > SHA256SUMS
+          sha256sum -- *.deb *.rpm *.pkg.tar.zst PKGBUILD network-manager-gpclient.install > SHA256SUMS
           sed -i 's/~/./g' SHA256SUMS
           cat SHA256SUMS
 
@@ -690,6 +721,8 @@ jobs:
             release-files/*.deb
             release-files/*.rpm
             release-files/*.pkg.tar.zst
+            release-files/PKGBUILD
+            release-files/network-manager-gpclient.install
             release-files/SHA256SUMS
             release-files/sbom-rust.cdx.json
           generate_release_notes: true

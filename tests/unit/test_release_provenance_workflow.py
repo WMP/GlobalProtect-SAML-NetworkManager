@@ -167,6 +167,8 @@ def test_sha256sums_covers_every_package_under_the_name_of_the_asset(tmp_path):
         "network-manager-gpclient-gnome_2.0.0-1~jammy1_arm64.deb": b"deb2",
         "network-manager-gpclient-2.0.0-1.fc44.x86_64.rpm": b"rpm",
         "network-manager-gpclient-plasma-2.0.0-1-x86_64.pkg.tar.zst": b"arch",
+        "PKGBUILD": b"pkgbuild",
+        "network-manager-gpclient.install": b"hooks",
     }
     out, result = run_sums(tmp_path, files)
     assert result.returncode == 0, result.stderr
