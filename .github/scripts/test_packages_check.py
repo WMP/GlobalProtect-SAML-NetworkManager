@@ -127,7 +127,7 @@ def published_summary(repo, pr, sha, script_ref, debs, rpms=()):
     if rpms:
         lines += [
             "On an RPM system the script picks the packages for the target "
-            "(Fedora 43 to 45, EL 10, openSUSE Leap 16.0 or Tumbleweed) from `/etc/os-release`, "
+            "(Fedora 43 to 45, EL 10, openSUSE Leap 16.0, 16.1 or Tumbleweed) from `/etc/os-release`, "
             "the architecture (x86_64 or aarch64) from `uname -m` and the desktop as above "
             "(`-gnome` or `-plasma`). It hands them to `dnf` (`zypper` on openSUSE), which asks "
             "for confirmation (`--yes` skips the question). The test packages are not signed. "

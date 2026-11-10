@@ -6,7 +6,7 @@
 #   rpm/build.sh --install-test <target> <amd64|arm64> [<dir with the RPMs>]
 #
 # <target> is a name from rpm/targets (fedora43, fedora44, fedora45, el10, leap16.0,
-# tumbleweed). The output directory defaults to output/<target>-<arch>. It receives
+# leap16.1, tumbleweed). The output directory defaults to output/<target>-<arch>. It receives
 # the three binary RPMs network-manager-gpclient, -gnome and -plasma, named
 # <name>-<version>-<release>.<x86_64|aarch64>.rpm; no source RPM and no debuginfo.
 #

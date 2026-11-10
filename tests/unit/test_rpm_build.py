@@ -22,7 +22,7 @@ import pytest
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 RPM_DIR = os.path.join(ROOT, "rpm")
 
-EXPECTED_TARGETS = ["fedora43", "fedora44", "fedora45", "el10", "leap16.0", "tumbleweed"]
+EXPECTED_TARGETS = ["fedora43", "fedora44", "fedora45", "el10", "leap16.0", "leap16.1", "tumbleweed"]
 
 
 def read_targets():

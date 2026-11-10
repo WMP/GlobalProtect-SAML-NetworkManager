@@ -695,7 +695,7 @@ def test_notes_step_does_not_edit_when_the_script_fails(tmp_path, assets, body):
 # --- RPM packages: a second table, Ubuntu output unchanged ---------------------
 
 RPM_TARGETS = {"fc43": "Fedora 43", "fc44": "Fedora 44", "fc45": "Fedora 45", "el10": "EL 10",
-               "lp160": "openSUSE Leap 16.0", "tw": "openSUSE Tumbleweed"}
+               "lp160": "openSUSE Leap 16.0", "lp161": "openSUSE Leap 16.1", "tw": "openSUSE Tumbleweed"}
 
 
 def rpm_asset_name(package, dist, arch, version="1.4.2"):
@@ -737,7 +737,8 @@ def test_rpm_downloads_have_their_own_table_with_a_row_per_target(tmp_path):
     assert "| RPM target | x86_64 | aarch64 |" in rows
     labels = [row.split(" | ")[0].lstrip("| ") for row in rows if row.startswith("| ") and "RPM target" not in row]
     rpm_labels = [label for label in labels if not label.startswith("Ubuntu")]
-    assert rpm_labels == ["Fedora 43", "Fedora 44", "Fedora 45", "EL 10", "openSUSE Leap 16.0", "openSUSE Tumbleweed"]
+    assert rpm_labels == ["Fedora 43", "Fedora 44", "Fedora 45", "EL 10", "openSUSE Leap 16.0", "openSUSE Leap 16.1",
+                          "openSUSE Tumbleweed"]
     row = next(r for r in rows if r.startswith("| Fedora 44 |"))
     assert row.count("[gpclient](") == 2 and row.count("[gnome](") == 2 and row.count("[plasma](") == 2
     assert "docs/RPM_REPO.md" in out

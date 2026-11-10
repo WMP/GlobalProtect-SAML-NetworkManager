@@ -80,7 +80,7 @@ enter the portal address, connect.</p>
 
 <p>Every package and the repository metadata are signed. Pick the target of your
 distribution in the table below (<code>fedora43</code>, <code>fedora44</code>,
-<code>fedora45</code>, <code>el10</code>, <code>leap16.0</code> or <code>tumbleweed</code>).</p>
+<code>fedora45</code>, <code>el10</code>, <code>leap16.0</code>, <code>leap16.1</code> or <code>tumbleweed</code>).</p>
 
 <pre><code># Fedora
 sudo curl -fsSL -o /etc/yum.repos.d/network-manager-gpclient.repo \
@@ -93,7 +93,7 @@ sudo curl -fsSL -o /etc/yum.repos.d/network-manager-gpclient.repo \
   __REPO_URL__/rpm/el10/network-manager-gpclient.repo
 sudo dnf install network-manager-gpclient-gnome
 
-# openSUSE Leap 16.0 (leap16.0) or Tumbleweed (tumbleweed)
+# openSUSE Leap 16.0 (leap16.0), Leap 16.1 (leap16.1) or Tumbleweed (tumbleweed)
 sudo zypper addrepo __REPO_URL__/rpm/tumbleweed/network-manager-gpclient.repo
 sudo zypper refresh
 sudo zypper install network-manager-gpclient-gnome</code></pre>

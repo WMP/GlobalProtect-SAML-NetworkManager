@@ -35,6 +35,7 @@ on:
           - "fedora45"
           - "el10"
           - "leap16.0"
+          - "leap16.1"
           - "tumbleweed"
           - "all"
 
@@ -339,7 +340,7 @@ jobs:
       attestations: write
     strategy:
       matrix:
-        target: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.rpm_target == 'all' && fromJSON('["fedora43", "fedora44", "fedora45", "el10", "leap16.0", "tumbleweed"]') || fromJSON(format('["{0}"]', github.event.inputs.rpm_target))) || fromJSON('["fedora43", "fedora44", "fedora45", "el10", "leap16.0", "tumbleweed"]') }}
+        target: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.rpm_target == 'all' && fromJSON('["fedora43", "fedora44", "fedora45", "el10", "leap16.0", "leap16.1", "tumbleweed"]') || fromJSON(format('["{0}"]', github.event.inputs.rpm_target))) || fromJSON('["fedora43", "fedora44", "fedora45", "el10", "leap16.0", "leap16.1", "tumbleweed"]') }}
         arch: [amd64, arm64]
         include:
           - arch: amd64
