@@ -3,7 +3,7 @@
 takes (POST/PATCH /repos/{repo}/check-runs).
 
     test_packages_check.py --state published --pr 24 --sha <head sha> \\
-        --repo OWNER/REPO --debs-dir upload/ --rpms-dir upload/
+        --repo OWNER/REPO --debs-dir upload/ --rpms-dir upload/ --arch-dir upload/
     test_packages_check.py --state failed --pr 24 --sha ... --repo ... --run-url URL
     test_packages_check.py --state not-published --reason "..." --pr 24 ...
     test_packages_check.py --state publish-failed --run-url URL --pr 24 ...
@@ -37,6 +37,11 @@ RPM_RE = re.compile(
     r"network-manager-gpclient(?:-gnome|-plasma)?-[0-9][A-Za-z0-9.+~_]*-[0-9]+"
     r"\.(?:fc[0-9]+|el[0-9]+|lp[0-9]+|tw)(?:\.pr[0-9]+\.[0-9]+)?\.(?:x86_64|aarch64)\.rpm"
 )
+# Arch Linux packages: <package>-<version>[.pr<PR>.<run>]-<pkgrel>-x86_64.pkg.tar.zst with the
+# three packages we build (the version has no "-"). No debug packages, no signatures.
+ARCH_RE = re.compile(
+    r"network-manager-gpclient(?:-gnome|-plasma)?-[0-9][A-Za-z0-9._+]*-[0-9]+-x86_64\.pkg\.tar\.zst"
+)
 RUN_URL_RE = re.compile(r"^https://github\.com/[\w.-]+/[\w.-]+/actions/runs/\d+$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 REPO_RE = re.compile(r"^[\w.-]+/[\w.-]+$")
@@ -67,10 +72,11 @@ def github_name(name):
     return name.replace("~", ".")
 
 
-def published_summary(repo, pr, sha, script_ref, debs, rpms=()):
+def published_summary(repo, pr, sha, script_ref, debs, rpms=(), archs=()):
     command = install_command(repo, pr, script_ref)
     release = "https://github.com/%s/releases/tag/pr-%s" % (repo, pr)
-    matches = [PACKAGE_RE.match(d) for d in debs] + [RPM_PACKAGE_RE.match(r) for r in rpms]
+    matches = [PACKAGE_RE.match(d) for d in debs] + [RPM_PACKAGE_RE.match(r) for r in rpms] \
+        + [RPM_PACKAGE_RE.match(a) for a in archs]
     shown = sorted({m.group(1) for m in matches if m})
     if debs and not rpms:
         version_text = ("Its version ends in `+pr%s.<run>`, above the released one, so apt installs it "
@@ -78,9 +84,15 @@ def published_summary(repo, pr, sha, script_ref, debs, rpms=()):
     elif debs:
         version_text = ("Its version ends in `+pr%s.<run>` (RPM release: `.pr%s.<run>`), above the "
                         "released one, so apt, dnf and zypper install it over the release. " % (pr, pr))
-    else:
+    elif rpms:
         version_text = ("Its release ends in `.pr%s.<run>`, above the released one, so dnf and zypper "
                         "install it over the release. " % pr)
+    else:
+        version_text = ""
+    if archs:
+        # pkgver "1.5.0.pr24.57" is newer than the release 1.5.0-1 (vercmp)
+        version_text += ("The Arch Linux version ends in `.pr%s.<run>` (before the `-<pkgrel>`), above the "
+                         "released one, so pacman installs it over the release. " % pr)
     lines = [
         "### Install this PR's test packages",
         "",
@@ -150,18 +162,36 @@ def published_summary(repo, pr, sha, script_ref, debs, rpms=()):
             "files again.",
             "",
         ]
+    if archs:
+        lines += [
+            "On Arch Linux the script takes the three packages (x86_64 only), the desktop as above "
+            "(`-gnome` or `-plasma`), and hands them to `pacman -U`, which asks for confirmation "
+            "(`--yes` skips the question). The test packages are not signed.",
+            "",
+            "#### Back to the released Arch Linux version",
+            "",
+            "With the pacman repository set up as in `docs/ARCH_REPO.md`:",
+            "",
+            "```bash",
+            "sudo pacman -Syyuu   # a full downgrade of what is newer than the repository, the test packages too",
+            "```",
+            "",
+            "Without it: `sudo pacman -R network-manager-gpclient-gnome network-manager-gpclient` "
+            "(or the plasma package) and install the released `.pkg.tar.zst` files again.",
+            "",
+        ]
     lines += [
         "<details><summary>Published packages (%d files, %s)</summary>" %
-        (len(debs) + len(rpms), ", ".join(shown) or "none"),
+        (len(debs) + len(rpms) + len(archs), ", ".join(shown) or "none"),
         "",
     ]
     # As the release lists them, not as the build named them
-    lines += ["- `%s`" % name for name in sorted(github_name(d) for d in list(debs) + list(rpms))]
+    lines += ["- `%s`" % name for name in sorted(github_name(d) for d in list(debs) + list(rpms) + list(archs))]
     lines += ["", "</details>", ""]
     return "\n".join(lines)
 
 
-def render(state, pr, sha, repo, script_ref="main", debs=(), run_url="", reason="", rpms=()):
+def render(state, pr, sha, repo, script_ref="main", debs=(), run_url="", reason="", rpms=(), archs=()):
     """The check run as a dict."""
     if not PR_RE.fullmatch(str(pr)):
         raise CheckError("not a pull request number: %r" % (pr,))
@@ -174,8 +204,8 @@ def render(state, pr, sha, repo, script_ref="main", debs=(), run_url="", reason=
 
     check = {"name": NAME, "head_sha": sha, "status": "completed"}
     if state == "published":
-        debs, rpms = list(debs), list(rpms)
-        if not debs and not rpms:
+        debs, rpms, archs = list(debs), list(rpms), list(archs)
+        if not debs and not rpms and not archs:
             raise CheckError("no packages to publish: refusing to announce an empty release")
         for name in debs:
             if not DEB_RE.fullmatch(name):
@@ -183,11 +213,14 @@ def render(state, pr, sha, repo, script_ref="main", debs=(), run_url="", reason=
         for name in rpms:
             if not RPM_RE.fullmatch(name):
                 raise CheckError("unexpected package file name: %r" % (name,))
+        for name in archs:
+            if not ARCH_RE.fullmatch(name):
+                raise CheckError("unexpected package file name: %r" % (name,))
         check["conclusion"] = "success"
         check["details_url"] = "https://github.com/%s/releases/tag/pr-%s" % (repo, pr)
         check["output"] = {
             "title": "Install: " + install_command(repo, pr, script_ref),
-            "summary": published_summary(repo, pr, sha, script_ref, sorted(debs), sorted(rpms)),
+            "summary": published_summary(repo, pr, sha, script_ref, sorted(debs), sorted(rpms), sorted(archs)),
         }
     elif state == "failed":
         if run_url and not RUN_URL_RE.fullmatch(run_url):
@@ -219,16 +252,17 @@ def render(state, pr, sha, repo, script_ref="main", debs=(), run_url="", reason=
 
 
 def filter_packages(source, copy_to=""):
-    """The plain .deb and binary .rpm files below `source` as {name: path}; with `copy_to`, they
+    """The plain .deb, binary .rpm and .pkg.tar.zst files below `source` as {name: path}; with `copy_to`, they
     are also copied there. Anything else (odd names, links, other than regular files) is
     skipped and reported on stderr, never passed on."""
     found = {}
     for directory, _subdirs, names in os.walk(source):
         for name in sorted(names):
             path = os.path.join(directory, name)
-            if not (name.endswith(".deb") or (name.endswith(".rpm") and not name.endswith(".src.rpm"))):
+            if not (name.endswith((".deb", ".pkg.tar.zst")) or (name.endswith(".rpm") and not name.endswith(".src.rpm"))):
                 continue
-            if os.path.islink(path) or not os.path.isfile(path) or not (DEB_RE.fullmatch(name) or RPM_RE.fullmatch(name)):
+            if os.path.islink(path) or not os.path.isfile(path) or not (
+                    DEB_RE.fullmatch(name) or RPM_RE.fullmatch(name) or ARCH_RE.fullmatch(name)):
                 # repr: a hostile name must not reach the log as it is
                 print("skipping a package with an unexpected file name: %r" % (name,), file=sys.stderr)
                 continue
@@ -253,10 +287,11 @@ def main(argv=None):
     parser.add_argument("--script-ref", default="main", help="branch to fetch install-pr-build.sh from")
     parser.add_argument("--debs-dir", default="", help="directory with the published .deb files")
     parser.add_argument("--rpms-dir", default="", help="directory with the published binary .rpm files")
+    parser.add_argument("--arch-dir", default="", help="directory with the published Arch Linux packages")
     parser.add_argument("--run-url", default="", help="the workflow run, shown when nothing was published")
     parser.add_argument("--reason", default="", help="why nothing was published (state not-published)")
     parser.add_argument("--filter", default="", metavar="DIR",
-                        help="print the names of acceptable .deb and binary .rpm files below DIR, one per line")
+                        help="print the names of acceptable .deb, binary .rpm and .pkg.tar.zst files below DIR, one per line")
     parser.add_argument("--copy-to", default="", metavar="DIR", help="with --filter: copy them to DIR")
     args = parser.parse_args(argv)
 
@@ -289,8 +324,16 @@ def main(argv=None):
         except OSError as exc:
             print("error: cannot read %s: %s" % (args.rpms_dir, exc), file=sys.stderr)
             return 1
+    archs = []
+    if args.arch_dir:
+        try:
+            archs = sorted(n for n in os.listdir(args.arch_dir) if n.endswith(".pkg.tar.zst"))
+        except OSError as exc:
+            print("error: cannot read %s: %s" % (args.arch_dir, exc), file=sys.stderr)
+            return 1
     try:
-        check = render(args.state, args.pr, args.sha, args.repo, args.script_ref, debs, args.run_url, args.reason, rpms)
+        check = render(args.state, args.pr, args.sha, args.repo, args.script_ref, debs, args.run_url, args.reason, rpms,
+                       archs)
     except CheckError as exc:
         print("error: %s" % exc, file=sys.stderr)
         return 1

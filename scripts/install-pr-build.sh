@@ -7,7 +7,7 @@
 # CI publishes every open pull request as the prerelease "pr-<N>" (see
 # .github/workflows/pr-test-packages.yml) and removes it when the PR closes. This
 # picks the package files for your distribution, architecture and desktop from
-# that release and hands them to apt (.deb), dnf or zypper (.rpm). The package
+# that release and hands them to apt (.deb), dnf or zypper (.rpm) or pacman (.pkg.tar.zst). The package
 # manager asks for confirmation unless --yes is given.
 #
 # On Ubuntu 24.04 the Plasma editor is network-manager-gpclient-plasma-6 (built
@@ -23,6 +23,10 @@
 # (1.fc44.pr24.57 sorts after 1.fc44). Supported: Fedora 43, 44, 45, EL 10
 # (AlmaLinux, Rocky, RHEL, CentOS Stream; needs EPEL and CRB), openSUSE Leap 16.0,
 # 16.1 and Tumbleweed, on x86_64 and aarch64. EL 9 is not supported (no webkit2gtk-4.1).
+#
+# The Arch Linux packages of a pull request have the version <version>.pr<N>.<run>
+# (1.5.0.pr24.57-1 sorts after the release 1.5.0-1), so pacman installs them over
+# the released version. Arch Linux x86_64 only.
 #
 # Before anything is installed, the files are checked with `gh attestation
 # verify` (build provenance of build-release.yml), when gh is installed,
@@ -53,11 +57,11 @@ usage: install-pr-build.sh <PR number> [--desktop gnome|plasma|plasma-6] [--repo
                        plasma on Ubuntu 24.04, KDE neon means -plasma-6 and Ubuntu
                        means -plasma, but not with plasma-nm 6 or newer installed
                        (stops). plasma-6 (Ubuntu 24.04 only) installs -plasma-6
-                       whatever the system is. On RPM systems the only
-                       plasma package is network-manager-gpclient-plasma
+                       whatever the system is. On RPM and Arch Linux systems the
+                       only plasma package is network-manager-gpclient-plasma
   --repo OWNER/REPO    the GitHub repository that published the packages
                        (default: WMP/GlobalProtect-SAML-NetworkManager)
-  --yes                do not ask apt, dnf or zypper for confirmation
+  --yes                do not ask apt, dnf, zypper or pacman for confirmation
 EOF
 }
 
@@ -119,7 +123,7 @@ os_value() {
     printf '%s' "$value"
 }
 
-[ -r "$OS_RELEASE" ] || die "cannot read $OS_RELEASE: this script supports Ubuntu only, plus KDE neon, Fedora, EL 10 and openSUSE"
+[ -r "$OS_RELEASE" ] || die "cannot read $OS_RELEASE: this script supports Ubuntu only, plus KDE neon, Fedora, EL 10, openSUSE and Arch Linux"
 os_id="$(os_value ID)"
 version_id="$(os_value VERSION_ID)"
 # KDE neon is Ubuntu 24.04 with Plasma 6. The RPM targets are the ones of rpm/targets.
@@ -127,6 +131,7 @@ rpm_target=""
 rpm_dist=""
 case "$os_id" in
     ubuntu|neon) package_format=deb ;;
+    arch) package_format=arch ;;
     fedora)
         package_format=rpm
         case "$version_id" in
@@ -150,7 +155,7 @@ case "$os_id" in
     opensuse-tumbleweed)
         package_format=rpm
         rpm_target=tumbleweed; rpm_dist=.tw ;;
-    *) die "this is '$os_id', not Ubuntu or KDE neon, and not Fedora, EL 10 or openSUSE: the test packages are built for Ubuntu 22.04, 24.04 and 26.04 (and KDE neon, which is Ubuntu 24.04 with Plasma 6), Fedora 43 to 45, EL 10, openSUSE Leap 16.0, 16.1 and Tumbleweed only" ;;
+    *) die "this is '$os_id', not Ubuntu or KDE neon, and not Fedora, EL 10, openSUSE or Arch Linux: the test packages are built for Ubuntu 22.04, 24.04 and 26.04 (and KDE neon, which is Ubuntu 24.04 with Plasma 6), Fedora 43 to 45, EL 10, openSUSE Leap 16.0, 16.1 and Tumbleweed, and Arch Linux (x86_64) only" ;;
 esac
 
 if [ "$package_format" = deb ]; then
@@ -181,6 +186,14 @@ if [ "$package_format" = deb ]; then
     [ "$desktop" != "plasma-6" ] || [ "$codename" = "noble" ] \
         || die "--desktop plasma-6 is for Ubuntu 24.04 (noble) only, not ${codename:-unknown}: the other releases have one Plasma package, network-manager-gpclient-plasma"
     release_id="$codename"
+elif [ "$package_format" = arch ]; then
+    machine="$(uname -m)"
+    [ "$machine" = x86_64 ] \
+        || die "architecture '$machine' is not supported on Arch Linux: the test packages are built for x86_64 only (Arch Linux ARM is another distribution)"
+    arch=x86_64
+    [ "$desktop" != "plasma-6" ] \
+        || die "--desktop plasma-6 is for Ubuntu 24.04 (noble) only: on Arch Linux the plasma package is network-manager-gpclient-plasma"
+    release_id=arch
 else
     machine="$(uname -m)"
     case "$machine" in
@@ -270,6 +283,13 @@ def find(package):
             re.escape(package) + r"_[0-9][A-Za-z0-9.+-]*[~.]" + re.escape(release_id)
             + r"[0-9]+(?:[+.]pr" + re.escape(pr) + r"\.[0-9]+)?_" + re.escape(arch) + r"\.deb"
         )
+    elif package_format == "arch":
+        # <package>-<version>[.pr<N>.<run>]-<pkgrel>-x86_64.pkg.tar.zst; the marker is part of
+        # the version here, so a version with any other ".pr" is refused by name
+        pattern = re.compile(
+            re.escape(package) + r"-[0-9](?:(?!\.pr)[A-Za-z0-9._+])*"
+            + r"(?:\.pr" + re.escape(pr) + r"\.[0-9]+)?-[0-9]+-" + re.escape(arch) + r"\.pkg\.tar\.zst"
+        )
     else:
         pattern = re.compile(
             re.escape(package) + r"-[0-9][A-Za-z0-9.+~_]*-[0-9]+" + re.escape(rpm_dist)
@@ -308,6 +328,8 @@ PY
 echo
 if [ "$package_format" = deb ]; then
     echo "Ubuntu ${version_id:-?} ($codename), $arch, desktop: $desktop"
+elif [ "$package_format" = arch ]; then
+    echo "Arch Linux, $arch, desktop: $desktop"
 else
     echo "$os_id ${version_id:-?} ($rpm_target), $arch, desktop: $desktop"
 fi
@@ -357,6 +379,24 @@ fi
 
 runner=()
 [ "$(id -u)" -eq 0 ] || runner=(sudo)
+
+if [ "$package_format" = arch ]; then
+    # The test packages are not signed: pacman -U checks no signature of a file
+    manager=(pacman -U)
+    [ "$assume_yes" -eq 1 ] && manager+=(--noconfirm)
+    echo
+    echo "Running: ${runner[*]:+${runner[*]} }${manager[*]} <the packages above>"
+    "${runner[@]}" "${manager[@]}" "${package_files[@]}" || die "pacman failed, nothing more was done"
+    cat <<EOF
+
+Installed.
+
+Without the test packages: sudo pacman -R ${packages[*]}
+and install the released packages again (see docs/ARCH_REPO.md or
+https://github.com/$REPO/releases).
+EOF
+    exit 0
+fi
 
 if [ "$package_format" = rpm ]; then
     if [ "$rpm_target" = el10 ]; then

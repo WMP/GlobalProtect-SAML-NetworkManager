@@ -761,3 +761,148 @@ class TestFilterRpm:
             rendered = False
 
         assert rendered == bool(check.RPM_RE.fullmatch(name))
+
+
+# --- Arch Linux packages -------------------------------------------------------------------------
+
+ARCHS = [
+    "network-manager-gpclient-1.4.2-1-x86_64.pkg.tar.zst",
+    "network-manager-gpclient-gnome-1.4.2-1-x86_64.pkg.tar.zst",
+    "network-manager-gpclient-plasma-1.4.2-1-x86_64.pkg.tar.zst",
+]
+PR_ARCHS = [name.replace("1.4.2", "1.4.2.pr24.57") for name in ARCHS]
+BAD_ARCHS = [
+    "network-manager-gpclient-1.4.2-1-aarch64.pkg.tar.zst",
+    "network-manager-gpclient-1.4.2-1-any.pkg.tar.zst",
+    "network-manager-gpclient-debug-1.4.2-1-x86_64.pkg.tar.zst",
+    "network-manager-gpclient-plasma-6-1.4.2-1-x86_64.pkg.tar.zst",
+    "network-manager-gpclient-1.4.2-1-x86_64.pkg.tar.xz",
+    "network-manager-gpclient-1.4.2-1-x86_64.pkg.tar.zst.sig",
+    "network-manager-gpclient-1.4.2-x86_64.pkg.tar.zst",
+    "network-manager-gpclient-1.4.2-1-x86_64.pkg.tar.zst ",
+    "network-manager-gpclient-1.4.2-1-x86_64.pkg.tar.zst\n",
+    "network-manager-gpclient-1.4.2-1-x86_64.pkg.tar.zst;rm",
+    "../network-manager-gpclient-1.4.2-1-x86_64.pkg.tar.zst",
+    "other-1.4.2-1-x86_64.pkg.tar.zst",
+    "$(x)-1.4.2-1-x86_64.pkg.tar.zst",
+]
+
+
+class TestArch:
+    def test_an_arch_only_release_is_announced(self):
+        result = published(debs=[], archs=PR_ARCHS)
+
+        assert result["conclusion"] == "success"
+        assert result["output"]["title"] == f"Install: {COMMAND}"
+
+    def test_the_summary_counts_and_names_the_arch_packages_too(self):
+        summary = published(debs=PR_DEBS, rpms=PR_RPMS, archs=PR_ARCHS)["output"]["summary"]
+
+        assert f"Published packages ({len(PR_DEBS) + len(PR_RPMS) + len(PR_ARCHS)} files" in summary
+        listed = [line[3:-1] for line in summary.splitlines() if line.startswith("- `")]
+        assert sorted(listed) == sorted([on_github(n) for n in PR_DEBS] + PR_RPMS + PR_ARCHS)
+
+    def test_the_summary_says_how_the_script_treats_arch_linux(self):
+        summary = published(debs=[], archs=PR_ARCHS)["output"]["summary"]
+
+        for text in ("pacman -U", "x86_64 only", ".pr24.<run>", "docs/ARCH_REPO.md", "pacman -Syyuu"):
+            assert text in summary
+
+    def test_an_arch_only_summary_is_not_about_apt_or_rpm(self):
+        summary = published(debs=[], archs=PR_ARCHS)["output"]["summary"]
+
+        for text in ("apt", "dpkg", "Ubuntu", "dnf", "zypper", "RPM_REPO"):
+            assert text not in summary
+
+    @pytest.mark.parametrize("kind", ["debs", "rpms"])
+    def test_a_summary_without_arch_packages_has_nothing_about_pacman(self, kind):
+        summary = published(debs=PR_DEBS if kind == "debs" else [], rpms=PR_RPMS if kind == "rpms" else [])
+        for text in ("pacman", "ARCH_REPO", "Arch Linux"):
+            assert text not in summary["output"]["summary"]
+
+    @pytest.mark.parametrize("name", ARCHS + PR_ARCHS)
+    def test_the_arch_packages_of_the_build_are_plain_names(self, name):
+        assert check.ARCH_RE.fullmatch(name)
+        assert published(debs=[], archs=[name])["conclusion"] == "success"
+
+    @pytest.mark.parametrize("name", BAD_ARCHS)
+    def test_other_arch_names_are_refused(self, name):
+        assert not check.ARCH_RE.fullmatch(name)
+        with pytest.raises(check.CheckError, match="unexpected package file name"):
+            published(debs=DEBS, archs=ARCHS[:1] + [name])
+
+    def test_a_deb_name_is_no_arch_name(self):
+        with pytest.raises(check.CheckError, match="unexpected package file name"):
+            published(debs=[], archs=DEBS[:1])
+        with pytest.raises(check.CheckError, match="unexpected package file name"):
+            published(debs=ARCHS[:1])
+
+    def test_the_command_line_reads_the_arch_directory_and_ignores_signatures(self, tmp_path):
+        for name in ARCHS + [ARCHS[0] + ".sig", "README.txt"]:
+            (tmp_path / name).write_text("x")
+
+        result = subprocess.run(
+            [sys.executable, SCRIPT, "--state", "published", "--pr", PR, "--sha", SHA, "--repo", REPO,
+             "--arch-dir", str(tmp_path)], capture_output=True, text=True)
+
+        assert result.returncode == 0, result.stderr
+        summary = json.loads(result.stdout)["output"]["summary"]
+        assert f"Published packages ({len(ARCHS)} files" in summary
+        assert ".sig" not in summary
+
+    def test_the_command_line_refuses_an_arch_directory_that_does_not_exist(self, tmp_path):
+        result = subprocess.run(
+            [sys.executable, SCRIPT, "--state", "published", "--pr", PR, "--sha", SHA, "--repo", REPO,
+             "--arch-dir", str(tmp_path / "nope")], capture_output=True, text=True)
+
+        assert result.returncode == 1 and result.stdout == ""
+        assert "Traceback" not in result.stderr
+
+
+class TestFilterArch:
+    def artifacts(self, tmp_path, names_by_dir):
+        return TestFilter().artifacts(tmp_path, names_by_dir)
+
+    def run(self, *args):
+        return subprocess.run([sys.executable, SCRIPT, *args], capture_output=True, text=True)
+
+    def test_all_three_formats_are_printed_and_copied_together(self, tmp_path):
+        root = self.artifacts(tmp_path, {"debs-a": PR_DEBS[:1], "rpms-x": PR_RPMS[:1], "arch-x86_64": PR_ARCHS})
+
+        result = self.run("--filter", str(root), "--copy-to", str(tmp_path / "upload"))
+
+        assert result.returncode == 0, result.stderr
+        expected = sorted(PR_DEBS[:1] + PR_RPMS[:1] + PR_ARCHS)
+        assert result.stdout.splitlines() == expected
+        assert sorted(os.listdir(tmp_path / "upload")) == expected
+
+    @pytest.mark.parametrize("bad", [n for n in BAD_ARCHS if n.endswith(".pkg.tar.zst") and "/" not in n
+                                     and "\n" not in n and " " not in n])
+    def test_other_arch_names_are_neither_printed_nor_copied(self, tmp_path, bad):
+        root = self.artifacts(tmp_path, {"arch-x86_64": [ARCHS[0], bad]})
+
+        result = self.run("--filter", str(root), "--copy-to", str(tmp_path / "upload"))
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines() == [ARCHS[0]]
+        assert os.listdir(tmp_path / "upload") == [ARCHS[0]]
+        assert "skipping a package with an unexpected file name" in result.stderr
+
+    def test_signatures_are_not_packages(self, tmp_path):
+        root = self.artifacts(tmp_path, {"arch-x86_64": [ARCHS[0], ARCHS[0] + ".sig"]})
+
+        result = self.run("--filter", str(root))
+
+        assert result.stdout.splitlines() == [ARCHS[0]]
+        assert result.stderr == ""
+
+    def test_a_link_to_an_arch_package_is_not_followed(self, tmp_path):
+        root = self.artifacts(tmp_path, {"arch-x86_64": [ARCHS[0]]})
+        secret = tmp_path / "secret"
+        secret.write_text("not a package")
+        (root / "arch-x86_64" / ARCHS[1]).symlink_to(secret)
+
+        result = self.run("--filter", str(root), "--copy-to", str(tmp_path / "upload"))
+
+        assert result.stdout.splitlines() == [ARCHS[0]]
+        assert os.listdir(tmp_path / "upload") == [ARCHS[0]]

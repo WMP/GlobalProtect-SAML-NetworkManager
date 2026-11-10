@@ -8,7 +8,8 @@ Ubuntu release and architecture, so the notes start with a table: a row per
 Ubuntu release, a column per architecture, the packages of that pair in the
 cell. Its binary .rpm files (one per package, RPM target of rpm/targets and
 architecture) get a second table in the same form, a row per target and a column
-per RPM architecture; source RPMs are not listed. The links are those of the assets the release has and has finished
+per RPM architecture; source RPMs are not listed. The Arch Linux packages
+(.pkg.tar.zst, x86_64 only) get a third table with one row. The links are those of the assets the release has and has finished
 uploading. The table is wrapped in markers and merged into the body of the
 release (GitHub's generated notes): it replaces the block between the markers,
 or, with no block yet, goes to the top. The rest of the body is kept byte for
@@ -38,6 +39,11 @@ RPM_NAME_RE = re.compile(
     r"(?P<package>network-manager-gpclient(?:-gnome|-plasma)?)-"
     r"(?P<version>[0-9][A-Za-z0-9.+~_]*)-[0-9]+\."
     r"(?P<dist>fc[0-9]+|el[0-9]+|lp[0-9]+|tw)\.(?P<arch>x86_64|aarch64)\.rpm"
+)
+# <package>-<version>-<pkgrel>-x86_64.pkg.tar.zst (the version has no "-")
+ARCH_NAME_RE = re.compile(
+    r"(?P<package>network-manager-gpclient(?:-gnome|-plasma)?)-"
+    r"(?P<version>[0-9][A-Za-z0-9._+]*)-[0-9]+-x86_64\.pkg\.tar\.zst"
 )
 CORE = "network-manager-gpclient"
 # Short names in the order of a cell; any other package follows alphabetically
@@ -73,6 +79,14 @@ def parse_rpm(name):
     if not match:
         raise NotesError("unexpected name of a .rpm asset: %r" % (name,))
     return match.group("dist"), match.group("arch"), short_name(match.group("package"))
+
+
+def parse_arch(name):
+    """The short package name of an Arch Linux package asset name"""
+    match = ARCH_NAME_RE.fullmatch(name)
+    if not match:
+        raise NotesError("unexpected name of a .pkg.tar.zst asset: %r" % (name,))
+    return short_name(match.group("package"))
 
 
 def check_url(repo, name, url):
@@ -125,6 +139,7 @@ def render(repo, tag, assets):
         raise NotesError("the tag is empty")
     debs = []
     rpms = []
+    pkgs = []
     for asset in assets:
         name = asset.get("name") if isinstance(asset, dict) else None
         if not isinstance(name, str):
@@ -134,8 +149,10 @@ def render(repo, tag, assets):
             debs.append((name, asset.get("url")))
         elif name.endswith(".rpm") and not name.endswith(".src.rpm") and asset.get("state") == "uploaded":
             rpms.append((name, asset.get("url")))
-    if not debs and not rpms:
-        raise NotesError("no .deb or binary .rpm assets: refusing to write a release without downloads")
+        elif name.endswith(".pkg.tar.zst") and asset.get("state") == "uploaded":
+            pkgs.append((name, asset.get("url")))
+    if not debs and not rpms and not pkgs:
+        raise NotesError("no .deb, binary .rpm or .pkg.tar.zst assets: refusing to write a release without downloads")
 
     base = "https://github.com/%s" % repo
     blob = "%s/blob/%s" % (base, urllib.parse.quote(tag, safe="/"))
@@ -146,6 +163,10 @@ def render(repo, tag, assets):
         if debs:
             lines.append("")
         lines += rpm_table(repo, blob, rpms)
+    if pkgs:
+        if debs or rpms:
+            lines.append("")
+        lines += arch_table(repo, blob, pkgs)
     lines.append(END)
     return "\n".join(lines)
 
@@ -227,6 +248,29 @@ def rpm_table(repo, blob, rpms):
             row.append("<br>".join(links) or EMPTY)
         lines.append("| %s | %s |" % (rpm_row_label(dist), " | ".join(row)))
     return lines
+
+
+def arch_table(repo, blob, pkgs):
+    cells = {}
+    for name, url in pkgs:
+        short = parse_arch(name)
+        check_url(repo, name, url)
+        if short in cells:
+            raise NotesError("two assets for the same Arch Linux package: %r and %r" % (cells[short][0], name))
+        cells[short] = (name, url)
+
+    return [
+        "The Arch Linux packages are also in the signed pacman repository: see "
+        "[docs/ARCH_REPO.md](%s/docs/ARCH_REPO.md). With single files, take "
+        "`network-manager-gpclient` and one desktop package (`-gnome` or `-plasma`) and install "
+        "them together, e.g. `sudo pacman -U network-manager-gpclient-[0-9]*.pkg.tar.zst "
+        "network-manager-gpclient-gnome-[0-9]*.pkg.tar.zst`. The release files are not signed." % blob,
+        "",
+        "| Arch Linux | x86_64 |",
+        "|---|---|",
+        "| Arch Linux | %s |" % "<br>".join(
+            "[%s](%s)" % (short, cells[short][1]) for short in sorted(cells, key=lambda s: cell_key((s,)))),
+    ]
 
 
 def find_block(text, what):

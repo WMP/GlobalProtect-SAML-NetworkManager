@@ -790,7 +790,7 @@ def test_the_url_of_an_rpm_must_be_its_download_link(tmp_path):
 
 
 def test_no_deb_and_no_rpm_is_an_error(tmp_path):
-    refused(run(tmp_path, [asset("network-manager-gpclient-1.4.2-1.fc44.src.rpm")]), "no .deb or binary .rpm")
+    refused(run(tmp_path, [asset("network-manager-gpclient-1.4.2-1.fc44.src.rpm")]), "no .deb, binary .rpm or .pkg.tar.zst")
 
 
 def test_the_rpm_install_hint_picks_one_target_and_the_core_package_only(tmp_path):
@@ -815,3 +815,82 @@ def test_the_rpm_install_hint_glob_matches_only_the_core_package_of_a_target():
 def test_the_deb_only_notes_have_no_rpm_hint(tmp_path):
     out = run(tmp_path, full_matrix()).stdout
     assert "zypper" not in out and "<dist>" not in out
+
+
+# --- Arch Linux packages: a third table with one row ---------------------------
+
+
+def arch_asset_name(package, version="1.4.2", revision="1"):
+    return "%s-%s-%s-x86_64.pkg.tar.zst" % (package, version, revision)
+
+
+def arch_matrix():
+    return [asset(arch_asset_name(p)) for p in PACKAGES]
+
+
+def test_arch_asset_names_are_parsed():
+    assert release_notes.parse_arch(arch_asset_name(PACKAGES[0])) == "gpclient"
+    assert release_notes.parse_arch(arch_asset_name(PACKAGES[2])) == "plasma"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "network-manager-gpclient-1.4.2-1-aarch64.pkg.tar.zst",
+        "network-manager-gpclient-1.4.2-1-any.pkg.tar.zst",
+        "network-manager-gpclient-debug-1.4.2-1-x86_64.pkg.tar.zst",
+        "network-manager-gpclient-1.4.2-1-x86_64.pkg.tar.xz",
+        "network-manager-gpclient-1.4.2-1-x86_64.pkg.tar.zst.sig",
+        "network-manager-gpclient-1.4.2-x86_64.pkg.tar.zst",
+        "other-package-1.4.2-1-x86_64.pkg.tar.zst",
+    ],
+)
+def test_an_arch_name_that_does_not_match_is_not_parsed(name):
+    with pytest.raises(release_notes.NotesError):
+        release_notes.parse_arch(name)
+
+
+def test_arch_downloads_have_their_own_table_with_a_row(tmp_path):
+    out = run(tmp_path, full_matrix() + rpm_matrix() + arch_matrix()).stdout
+    rows = table_rows(out)
+    assert "| Arch Linux | x86_64 |" in rows
+    row = [r for r in rows if r.startswith("| Arch Linux | [")]
+    assert len(row) == 1
+    for short, package in zip(("gpclient", "gnome", "plasma"), PACKAGES, strict=True):
+        assert "[%s](%s/%s)" % (short, BASE, arch_asset_name(package)) in row[0]
+    assert "docs/ARCH_REPO.md" in out and "pacman -U" in out
+
+
+def test_the_other_tables_are_the_same_with_and_without_arch(tmp_path):
+    without = run(tmp_path, full_matrix() + rpm_matrix()).stdout
+    with_arch = run(tmp_path, full_matrix() + rpm_matrix() + arch_matrix()).stdout
+    assert without[:without.index(END)] in with_arch
+    assert "Arch Linux" not in without and "ARCH_REPO" not in without
+
+
+def test_arch_only_has_no_apt_and_no_rpm_table(tmp_path):
+    out = run(tmp_path, arch_matrix()).stdout
+    assert "| Arch Linux |" in out
+    assert "| Ubuntu |" not in out and "| RPM target |" not in out
+
+
+def test_unfinished_arch_packages_are_not_listed(tmp_path):
+    unfinished = asset(arch_asset_name(PACKAGES[0], version="9.9.9"), state="starter")
+    out = run(tmp_path, full_matrix() + arch_matrix() + [unfinished]).stdout
+    assert unfinished["name"] not in out
+
+
+@pytest.mark.parametrize("name", ["network-manager-gpclient-debug-1.4.2-1-x86_64.pkg.tar.zst",
+                                  "network-manager-gpclient-1.4.2-1-aarch64.pkg.tar.zst"])
+def test_an_arch_package_with_an_unexpected_name_is_an_error(tmp_path, name):
+    refused(run(tmp_path, full_matrix() + arch_matrix() + [asset(name)]), ".pkg.tar.zst")
+
+
+def test_two_arch_packages_with_the_same_name_are_an_error(tmp_path):
+    again = asset(arch_asset_name(PACKAGES[0], version="1.4.3"))
+    refused(run(tmp_path, arch_matrix() + [again]), "two assets")
+
+
+def test_the_url_of_an_arch_package_must_be_its_download_link(tmp_path):
+    bad = asset(arch_asset_name(PACKAGES[0]), url="https://evil.example/x.pkg.tar.zst")
+    refused(run(tmp_path, full_matrix() + [bad]), "url")

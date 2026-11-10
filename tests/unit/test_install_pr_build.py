@@ -75,6 +75,17 @@ def all_rpm_assets(target="fedora44", arch="x86_64", build=""):
 
 BUILD_RPM = ".pr24.57"
 
+ARCH_OS = 'NAME="Arch Linux"\nPRETTY_NAME="Arch Linux"\nID=arch\nBUILD_ID=rolling\n'
+
+
+def arch_pkg(suffix, version="1.4.2", revision="1", name_arch="x86_64"):
+    """File name of an Arch Linux release asset; a pull request's build has the marker in the version"""
+    return f"{CORE}{suffix}-{version}-{revision}-{name_arch}.pkg.tar.zst"
+
+
+def all_arch_assets(build=""):
+    return [arch_pkg(suffix, "1.4.2" + build) for suffix in ("", "-gnome", "-plasma")]
+
 
 def all_assets(tilde=False, build=""):
     return [
@@ -200,6 +211,17 @@ grep -qxF "$(basename "$file")" "$FAKE_DIR/gh_bad" 2>/dev/null && { echo "no att
 exit 0
 """
 
+# pacman: records the arguments; the packages have to exist while it runs
+FAKE_PACMAN = r"""#!/bin/bash
+printf '%s\n' "$@" > "$FAKE_DIR/pacman_args"
+for arg in "$@"; do
+    case "$arg" in
+        /*.pkg.tar.zst) cat "$arg" >> "$FAKE_DIR/pacman_payloads"; stat -c '%a' "$arg" >> "$FAKE_DIR/pacman_modes" ;;
+    esac
+done
+exit "${FAKE_PACMAN_EXIT:-0}"
+"""
+
 FAKE_APT = r"""#!/bin/bash
 {
     printf '%s\n' "$@"
@@ -233,7 +255,7 @@ class Sandbox:
         for name, body in (
             ("curl", FAKE_CURL), ("dpkg", FAKE_DPKG), ("dpkg-query", FAKE_DPKG_QUERY),
             ("id", FAKE_ID), ("sudo", FAKE_SUDO), ("apt", FAKE_APT), ("uname", FAKE_UNAME),
-            ("dnf", FAKE_RPM_MANAGER), ("zypper", FAKE_RPM_MANAGER), ("gh", FAKE_GH),
+            ("dnf", FAKE_RPM_MANAGER), ("zypper", FAKE_RPM_MANAGER), ("gh", FAKE_GH), ("pacman", FAKE_PACMAN),
         ):
             path = self.bin / name
             path.write_text(body)
@@ -320,6 +342,20 @@ class Sandbox:
         """File names handed to dnf or zypper (None when neither was called)"""
         call = self.rpm_manager()
         return None if call is None else [os.path.basename(a) for a in call[1] if a.endswith(".rpm")]
+
+    def set_arch_target(self, build=""):
+        """This machine is Arch Linux, the release has its packages"""
+        self.set_os("noble", ARCH_OS)
+        self.set_assets(all_arch_assets(build))
+
+    def pacman_args(self):
+        text = self.read("pacman_args")
+        return None if text is None else text.splitlines()
+
+    def installed_arch(self):
+        """File names handed to pacman (None when it was not called)"""
+        args = self.pacman_args()
+        return None if args is None else [os.path.basename(a) for a in args if a.endswith(".pkg.tar.zst")]
 
     def curl_urls(self):
         return (self.read("curl_urls") or "").splitlines()
@@ -1344,6 +1380,148 @@ class TestRpmRejected:
         assert "dnf failed" in result.stderr
         assert "Installed." not in result.stdout
         assert list(box.tmp.iterdir()) == []
+
+
+class TestArchInstall:
+    @pytest.mark.parametrize("build", ["", BUILD_RPM])
+    @pytest.mark.parametrize("desktop, suffix", [("GNOME", "-gnome"), ("KDE", "-plasma")])
+    def test_the_core_and_the_desktop_package_are_installed_with_pacman(self, box, build, desktop, suffix):
+        box.set_arch_target(build)
+
+        result = box.run("24", desktop=desktop)
+
+        assert result.returncode == 0, result.stderr
+        assert box.installed_arch() == [arch_pkg(s, "1.4.2" + build) for s in ("", suffix)]
+        assert box.pacman_args()[0] == "-U" and "--noconfirm" not in box.pacman_args()
+        assert box.apt_args() is None and box.rpm_manager() is None
+        assert box.read("sudo_calls").startswith("pacman -U ")
+        assert "Arch Linux, x86_64" in result.stdout
+        assert list(box.tmp.iterdir()) == []
+
+    def test_the_packages_exist_and_are_readable_while_pacman_runs(self, box):
+        box.set_arch_target()
+
+        result = box.run("24")
+
+        assert result.returncode == 0, result.stderr
+        assert box.read("pacman_payloads") == f"deb:{arch_pkg('')}\ndeb:{arch_pkg('-gnome')}\n"
+        assert set(box.read("pacman_modes").split()) == {"644"}
+
+    def test_yes_is_passed_on_to_pacman(self, box):
+        box.set_arch_target()
+
+        result = box.run("24", "--yes")
+
+        assert result.returncode == 0, result.stderr
+        assert "--noconfirm" in box.pacman_args()
+
+    def test_the_way_back_is_told(self, box):
+        box.set_arch_target()
+
+        result = box.run("24")
+
+        assert "sudo pacman -R network-manager-gpclient network-manager-gpclient-gnome" in result.stdout
+        assert "docs/ARCH_REPO.md" in result.stdout
+
+    def test_a_failing_pacman_is_reported(self, box):
+        box.set_arch_target()
+
+        result = box.run("24", FAKE_PACMAN_EXIT="1")
+
+        assert result.returncode != 0
+        assert "pacman failed" in result.stderr
+        assert "Installed." not in result.stdout
+        assert list(box.tmp.iterdir()) == []
+
+
+class TestArchRejected:
+    def assert_rejected(self, box, result, message, network=True):
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert message in result.stderr, result.stderr
+        assert box.pacman_args() is None, "pacman was called"
+        assert box.apt_args() is None and box.rpm_manager() is None
+        assert box.read("sudo_calls") is None, "sudo was called"
+        assert list(box.tmp.iterdir()) == [], "the temp dir was not removed"
+        if not network:
+            assert box.curl_urls() == [], "the network was used"
+
+    @pytest.mark.parametrize("machine", ["aarch64", "armv7h", "i686", "riscv64"])
+    def test_only_x86_64_is_supported(self, box, machine):
+        box.set_arch_target()
+
+        result = box.run("24", machine=machine)
+
+        self.assert_rejected(box, result, "x86_64 only", network=False)
+
+    @pytest.mark.parametrize("content", ['ID=archarm\n', 'ID=manjaro\nID_LIKE=arch\n', 'ID="arch;x"\n', 'ID=archlinux\n'])
+    def test_other_distributions_are_not_taken_for_arch(self, box, content):
+        box.set_arch_target()
+        box.set_os("noble", content)
+
+        result = box.run("24")
+
+        self.assert_rejected(box, result, "not Ubuntu or KDE neon", network=False)
+
+    def test_plasma_6_is_for_ubuntu_only(self, box):
+        box.set_arch_target()
+
+        result = box.run("24", "--desktop", "plasma-6")
+
+        self.assert_rejected(box, result, "--desktop plasma-6 is for Ubuntu 24.04", network=False)
+
+    def test_the_packages_of_another_pull_request_are_not_taken(self, box):
+        box.set_arch_target(".pr99.57")
+
+        result = box.run("24")
+
+        self.assert_rejected(box, result, "no network-manager-gpclient package for arch/x86_64")
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            arch_pkg("", name_arch="aarch64"),
+            arch_pkg("", name_arch="any"),
+            arch_pkg("", version="1.4.2.pr24.57x"),
+            arch_pkg("", version="1.4.2.pr124.57"),
+            arch_pkg("", version="1.4.2.pr24"),
+            f"{CORE}-debug-1.4.2-1-x86_64.pkg.tar.zst",
+            f"{CORE}-1.4.2-1-x86_64.pkg.tar.zst.sig",
+            f"{CORE}-1.4.2-1-x86_64.pkg.tar.xz",
+            f"{CORE}-1.4.2-x86_64.pkg.tar.zst",
+            f"x{CORE}-1.4.2-1-x86_64.pkg.tar.zst",
+        ],
+    )
+    def test_other_files_are_not_taken_for_the_core_package(self, box, name):
+        box.set_arch_target()
+        box.set_assets([name, arch_pkg("-gnome")])
+
+        result = box.run("24")
+
+        self.assert_rejected(box, result, "no network-manager-gpclient package for arch/x86_64")
+
+    def test_two_builds_of_the_same_package_are_refused(self, box):
+        box.set_arch_target()
+        box.set_assets(all_arch_assets() + [arch_pkg("", revision="2")])
+
+        result = box.run("24")
+
+        self.assert_rejected(box, result, "more than one network-manager-gpclient package")
+
+    def test_a_missing_desktop_package_is_named(self, box):
+        box.set_arch_target()
+        box.set_assets([arch_pkg(""), arch_pkg("-plasma")])
+
+        result = box.run("24", desktop="GNOME")
+
+        self.assert_rejected(box, result, "no network-manager-gpclient-gnome package for arch/x86_64")
+
+    def test_the_gnome_package_is_not_taken_for_the_core_one(self, box):
+        box.set_arch_target()
+        box.set_assets([arch_pkg("-gnome"), arch_pkg("-plasma")])
+
+        result = box.run("24")
+
+        self.assert_rejected(box, result, "no network-manager-gpclient package for arch/x86_64")
 
 
 class TestProvenance:
