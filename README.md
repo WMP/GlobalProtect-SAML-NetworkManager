@@ -101,14 +101,14 @@ sudo apt install ./network-manager-gpclient_*.deb ./network-manager-gpclient-gno
 ### Fedora, RHEL 10 and openSUSE (RPM)
 
 RPM repositories for Fedora 43, 44 and 45, RHEL/AlmaLinux/Rocky Linux 10 (with
-EPEL) and openSUSE Leap 16.0 and Tumbleweed, `x86_64` and `aarch64`. Fedora:
+EPEL) and openSUSE Leap 16.0, Leap 16.1 and Tumbleweed, `x86_64` and `aarch64`. Fedora:
 
 ```bash
 sudo dnf config-manager addrepo --from-repofile=https://wmp.github.io/GlobalProtect-SAML-NetworkManager/rpm/fedora$(rpm -E %fedora)/network-manager-gpclient.repo
 sudo dnf install network-manager-gpclient-gnome    # or network-manager-gpclient-plasma (Plasma 6)
 ```
 
-openSUSE Tumbleweed (Leap 16.0: `.../rpm/leap16.0/...`):
+openSUSE Tumbleweed (Leap 16.0: `.../rpm/leap16.0/...`, Leap 16.1: `.../rpm/leap16.1/...`):
 
 ```bash
 sudo zypper addrepo https://wmp.github.io/GlobalProtect-SAML-NetworkManager/rpm/tumbleweed/network-manager-gpclient.repo

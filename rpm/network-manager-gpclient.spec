@@ -4,7 +4,7 @@
 # Do not run rpmbuild on this file directly: rpm/build.sh passes the values of
 #   project_version  upstream version, from debian/changelog
 #   debian_release   Debian revision, from debian/changelog
-#   dist             distribution tag (.fc44, .el10, .lp160, .tw), from rpm/targets
+#   dist             distribution tag (.fc44, .el10, .lp160, .lp161, .tw), from rpm/targets
 #   pr_suffix        ".pr<PR>.<run>" for pull request builds, else empty
 #   sdbus_version    version of the bundled python-sdbus, from rpm/sources
 # and appends the %changelog that rpm/debian_changelog.py generates.
