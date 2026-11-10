@@ -126,8 +126,9 @@ fi
 # --- Copy, index, sign -----------------------------------------------------------
 
 rm -rf "$OUTDIR"
-repo="$OUTDIR/$ARCH_DIR"
-mkdir -p "$repo"
+mkdir -p "$OUTDIR/$ARCH_DIR"
+# Absolute: docker run -v takes a relative host path for a volume name
+repo="$(cd "$OUTDIR/$ARCH_DIR" && pwd)"
 for pkg in "${selected[@]}"; do
     cp "$pkg" "$repo/"
 done
