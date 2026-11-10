@@ -78,7 +78,8 @@ build error. This page explains how we find such a change and how we accept it.
    Then run `python3 scripts/upstream_contract.py features`. Classify each new
    changelog entry in `upstream/features.json`. When an entry affects the
    service, write an automated test in this repository and name it in `tests`.
-6. Change the `Upstream version:` line of `README.md` (both the text and the link).
+6. Change the `Upstream version:` line of `README.md` (both the text and the link),
+   and the `#commit=` of the three submodules in the user mode of `arch/PKGBUILD`.
 7. Build the packages (the Rust version of the Dockerfiles and the Makefile must
    not be older than `rust-toolchain.toml` of upstream) and run:
 
