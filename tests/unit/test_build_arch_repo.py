@@ -51,6 +51,11 @@ for arg in "$@"; do
     [ "$prev" = "-v" ] && dir="${arg%:/repo}"
     prev="$arg"
 done
+# Like the real docker: a host path of -v that is not absolute is taken for a volume name
+case "$dir" in
+    /*) ;;
+    *) echo "docker: Error response from daemon: create $dir: includes invalid characters for a local volume name" >&2; exit 125 ;;
+esac
 cd "$dir" || exit 1
 [ -z "$FAKE_NO_DB" ] || exit 0
 PATH="$FAKE_DIR/stubs:$PATH" REPO_NAME=gpclient bash "$FAKE_DIR/container_script"
@@ -141,7 +146,7 @@ class Box:
     def add_set(self, version="1.5.0", revision="1"):
         self.add(*[pkg_name(p, version, revision) for p in PACKAGES])
 
-    def run(self, *args, key=KEY, **extra_env):
+    def run(self, *args, key=KEY, relative=False, **extra_env):
         env = {
             "PATH": f"{self.bin}:/usr/bin:/bin",
             "FAKE_DIR": str(self.fake),
@@ -153,10 +158,14 @@ class Box:
             "HOME": str(self.root),
         }
         env.update(extra_env)
-        command = ["bash", SCRIPT, *args, str(self.incoming), str(self.out)]
+        # relative: the directories as publish-apt.yml passes them (incoming site/arch)
+        dirs = ([os.path.relpath(self.incoming, self.root), os.path.relpath(self.out, self.root)] if relative
+                else [str(self.incoming), str(self.out)])
+        command = ["bash", SCRIPT, *args, *dirs]
         if key:
             command.append(key)
-        return subprocess.run(command, env=env, capture_output=True, text=True, timeout=60)
+        return subprocess.run(command, env=env, capture_output=True, text=True, timeout=60,
+                              cwd=self.root if relative else None)
 
     def repo_add_args(self):
         path = self.fake / "repo_add_args"
@@ -194,6 +203,25 @@ class TestLayout:
         )
         expected = [name if "/" in name else "x86_64/" + name for name in expected] + ["GPG-KEY-gpclient"]
         assert box.tree() == sorted(expected)
+
+    def test_relative_directories_as_in_publish_apt_work(self, box):
+        # publish-apt.yml calls the script with "incoming site/arch": docker -v needs an absolute path
+        box.add_set()
+        box.index.write_text(box.index.read_text())
+
+        result = box.run("--index", str(box.index), relative=True)
+
+        assert result.returncode == 0, result.stderr
+        [call] = [c for c in box.calls() if c.startswith("docker ")]
+        assert f" -v {box.out / 'x86_64'}:/repo " in call
+        assert "x86_64/gpclient.db" in box.tree()
+
+    def test_the_fake_docker_refuses_a_relative_volume_path_like_the_real_one(self, box):
+        result = subprocess.run([str(box.bin / "docker"), "run", "-v", "site/arch/x86_64:/repo", "img"],
+                                env={"FAKE_DIR": str(box.fake), "PATH": "/usr/bin:/bin"},
+                                input="", capture_output=True, text=True, timeout=30)
+        assert result.returncode == 125
+        assert "invalid characters for a local volume name" in result.stderr
 
     def test_the_database_files_are_plain_files_not_symlinks(self, box):
         box.add_set()
