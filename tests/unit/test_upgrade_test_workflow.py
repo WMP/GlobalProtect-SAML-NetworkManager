@@ -159,10 +159,10 @@ class TestStepInTheWorkflow:
             text = handle.read()
 
         build = text.split("\n  build:\n")[1].split("\n  release:\n")[0]
-        # build and build-rpm: the contents stay read-only, the attestations of the packages
-        # (tests/unit/test_release_provenance_workflow.py) are all they may write
-        assert build.count("      contents: read\n      id-token: write\n      attestations: write\n") == 2
-        assert build.count("permissions:") == 2
+        # build, build-rpm and build-arch: the contents stay read-only, the attestations of the
+        # packages (tests/unit/test_release_provenance_workflow.py) are all they may write
+        assert build.count("      contents: read\n      id-token: write\n      attestations: write\n") == 3
+        assert build.count("permissions:") == 3
         assert "contents: write" not in build
 
 

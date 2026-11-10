@@ -41,6 +41,7 @@ exit 0
 
 DEB = "network-manager-gpclient_2.0.0-1~noble1_amd64.deb"
 RPM = "network-manager-gpclient-2.0.0-1.fc44.x86_64.rpm"
+PKG = "network-manager-gpclient-2.0.0-1-x86_64.pkg.tar.zst"
 
 
 def sha(data):
@@ -143,6 +144,36 @@ def test_file_missing_from_sha256sums_fails(box):
     assert f"{RPM} is not in SHA256SUMS" in result.stderr
 
 
+def test_an_arch_package_is_checked_against_sha256sums(box):
+    box.add(DEB)
+    box.add(PKG)
+    result = box.run()
+    assert result.returncode == 0, result.stderr
+    assert f"verified {PKG}" in result.stdout
+
+
+def test_a_release_with_only_an_arch_package_passes(box):
+    box.add(PKG)
+    assert box.run().returncode == 0
+
+
+def test_a_tampered_arch_package_fails(box):
+    box.add(DEB)
+    box.add(PKG)
+    (box.dir / PKG).write_bytes(b"tampered")
+    result = box.run()
+    assert result.returncode != 0
+    assert f"SHA256 of {PKG}" in result.stderr
+
+
+def test_an_arch_package_missing_from_sha256sums_fails(box):
+    box.add(DEB)
+    box.add(PKG, listed=False)
+    result = box.run()
+    assert result.returncode != 0
+    assert f"{PKG} is not in SHA256SUMS" in result.stderr
+
+
 def test_name_must_match_whole_not_as_a_suffix(box):
     box.add(DEB, listed_as="x" + DEB)
     result = box.run()
@@ -191,7 +222,7 @@ def test_empty_release_fails(box):
     (box.dir / "SHA256SUMS").write_text("")
     result = box.run()
     assert result.returncode != 0
-    assert "no .deb or .rpm" in result.stderr
+    assert "no .deb, .rpm or .pkg.tar.zst" in result.stderr
 
 
 def test_the_real_legacy_list_has_the_old_tags_only():

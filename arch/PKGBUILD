@@ -1,0 +1,206 @@
+# Arch Linux packaging of the GlobalProtect NetworkManager VPN plugin. It mirrors
+# debian/rules and rpm/network-manager-gpclient.spec: the same three packages with
+# the same files.
+#
+# Do not run makepkg on this file directly: arch/build.sh passes, in the environment,
+#   PROJECT_VERSION  upstream version, from debian/changelog
+#   DEBIAN_RELEASE   Debian revision, from debian/changelog (an integer)
+#   PR_SUFFIX        ".pr<PR>.<run>" for pull request builds, else empty
+#   SDBUS_VERSION    version of the bundled python-sdbus, from rpm/sources
+#   SDBUS_SHA256     sha256 of its source archive, from rpm/sources
+# and puts the source archive of the repository and the python-sdbus archive next to it.
+
+: "${PROJECT_VERSION:?PROJECT_VERSION, DEBIAN_RELEASE and SDBUS_VERSION must be defined: build with arch/build.sh}"
+: "${DEBIAN_RELEASE:?}" "${SDBUS_VERSION:?}" "${SDBUS_SHA256:?}"
+
+pkgbase=network-manager-gpclient
+pkgname=(network-manager-gpclient network-manager-gpclient-gnome network-manager-gpclient-plasma)
+# makepkg allows no "-" and ":" in pkgver and only "int[.int]" in pkgrel, so the pull
+# request marker goes into pkgver: "1.5.0.pr12.3-1" is newer than the release "1.5.0-1"
+# and than every earlier version (vercmp 1.5.0.pr12.3-1 1.5.0-1 prints 1), as the .deb
+# and RPM builds of a pull request are, so pacman installs it over the release; builds
+# of one PR order by run number (pr12.10 is newer than pr12.9, pr13.1 than pr12.99).
+pkgver=${PROJECT_VERSION}${PR_SUFFIX:-}
+pkgrel=$DEBIAN_RELEASE
+arch=(x86_64)
+url=https://github.com/WMP/GlobalProtect-SAML-NetworkManager
+# Per package, as debian/copyright says for the same files: the service and the
+# editors are LGPL-2.1-only; gpclient and gpauth are GPL-3.0-only with the Rust crates
+# (the other ids; third-party-licenses.txt lists them) and the LGPL-2.1-only openconnect
+# fork linked in; nm-vpn-plugin-utils is LGPL-2.0-or-later; the bundled python-sdbus is
+# LGPL-2.1-or-later. The same set as the License: tag of rpm/network-manager-gpclient.spec
+# (tests/unit/test_rpm_license.py).
+license=(GPL-3.0-only LGPL-2.1-only LGPL-2.0-or-later LGPL-2.1-or-later BSD-2-Clause BSD-3-Clause
+  MIT Apache-2.0 MPL-2.0 ISC Zlib Unicode-3.0 Unlicense CC0-1.0 BSL-1.0 MIT-0 0BSD)
+# gpclient and gpauth are already stripped by upstream's release profile; no debug package
+options=(!debug !lto)
+makedepends=(
+  autoconf automake cmake extra-cmake-modules gcc gettext libtool make patch pkgconf
+  glib2 gtk3 gtk4 libnm libnma libnma-gtk4 libsoup3 libxml2 openssl systemd-libs webkit2gtk-4.1
+  qt6-base ki18n kservice kwidgetsaddons networkmanager-qt plasma-nm
+  cargo cargo-auditable python python-pip python-setuptools python-wheel
+)
+source=(
+  "$pkgbase-$PROJECT_VERSION.tar.gz"
+  "sdbus-$SDBUS_VERSION.tar.gz"
+)
+# The first is made by arch/build.sh from the working tree
+sha256sums=(SKIP "$SDBUS_SHA256")
+
+prepare() {
+  cd "$pkgbase-$PROJECT_VERSION"
+  # gpclient and gpauth are GPL-3.0-only: ship upstream's text (license files go by
+  # basename, and LICENSE is this project's LGPL-2.1)
+  cp -p external/GlobalProtect-openconnect/LICENSE LICENSE.GPL-3.0
+}
+
+build() {
+  cd "$pkgbase-$PROJECT_VERSION"
+  # The openconnect crate builds the bundled openconnect and libxml2 (build.rs)
+  test -d external/GlobalProtect-openconnect/crates/openconnect/deps/openconnect/.
+  test -d external/GlobalProtect-openconnect/crates/openconnect/deps/libxml2/.
+
+  # NM_PLUGIN_DIR and MULTIARCH are used by "make install" only; package() installs by hand
+  make -C plugins/gnome all
+
+  mkdir -p plugins/plasma/build
+  (cd plugins/plasma/build && cmake .. -DQT_MAJOR_VERSION=6 -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr && make)
+
+  # python-sdbus: built here from the source archive, offline
+  python -m pip wheel --no-deps --no-build-isolation --no-index \
+    --wheel-dir sdbus-wheel "$srcdir/sdbus-$SDBUS_VERSION"
+
+  # The longest step comes last. cargo-auditable embeds the dependency list in the
+  # binaries. With upstream's release profile (strip, opt-level "z"), as the Debian
+  # build: makepkg.conf can export RUSTFLAGS, which would override it. With
+  # vendor/config.toml (scripts/vendor-crates.sh, in the source archive) the crates
+  # come from vendor/ and cargo does not use the network.
+  local vendor_flags=()
+  if [ -f "$PWD/vendor/config.toml" ]; then
+    vendor_flags=(--offline --config "$PWD/vendor/config.toml")
+  fi
+  (cd external/GlobalProtect-openconnect &&
+    env -u RUSTFLAGS cargo auditable build --locked "${vendor_flags[@]}" --release --bin gpclient --bin gpauth)
+
+  # The licenses of the Rust crates linked into gpclient and gpauth (offline; the build
+  # stops when a crate has no license)
+  python scripts/third_party_licenses.py -o third-party-licenses.txt
+}
+
+check() {
+  cd "$pkgbase-$PROJECT_VERSION"
+  # The Plasma widget tests, as debian/rules runs them
+  (cd plugins/plasma/build && ctest --output-on-failure --no-tests=error)
+}
+
+package_network-manager-gpclient() {
+  pkgdesc='NetworkManager VPN plugin for GlobalProtect: service, gpclient and gpauth'
+  # The libraries gpclient, gpauth and the plugin link (readelf -d), and what the Python programs need
+  depends=(networkmanager openconnect python systemd-libs vpnc xdg-utils
+    webkit2gtk-4.1 gtk3 libsoup3 glib2 dbus gdk-pixbuf2 cairo libxml2 gnutls p11-kit nettle gmp lz4 zlib
+    openssl gcc-libs glibc)
+  # The bundled sdbus extension lives in /usr/lib/python3.X/site-packages: pin the minor version of
+  # the Python that built it, so that pacman reports a conflict after a Python bump, not an ImportError
+  local pyver
+  pyver=$(python -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+  depends+=("python>=$pyver" "python<${pyver%.*}.$((${pyver#*.} + 1))")
+  # The same files as globalprotect-openconnect and its AUR variant
+  conflicts=(globalprotect-openconnect globalprotect-openconnect-git)
+  install=network-manager-gpclient.install
+  # The hooks in /etc/vpnc: %config(noreplace) of the spec
+  backup=(etc/vpnc/connect.d/90-gpclient-routing etc/vpnc/disconnect.d/90-gpclient-routing
+    etc/vpnc/post-connect.d/90-gpclient-notify etc/vpnc/reconnect.d/90-gpclient-notify)
+  cd "$pkgbase-$PROJECT_VERSION"
+
+  # The translations (po/LINGUAS): each domain goes to its own package
+  make install-mo MO_DOMAIN=NetworkManager-gpclient DESTDIR="$pkgdir"
+  install -D -m 0644 plugins/gnome/libnm-vpn-plugin-gpclient.so \
+    "$pkgdir/usr/lib/NetworkManager/libnm-vpn-plugin-gpclient.so"
+  install -D -m 0644 plugins/gnome/nm-gpclient-service.name \
+    "$pkgdir/usr/lib/NetworkManager/VPN/nm-gpclient-service.name"
+  install -D -m 0755 service/nm-gpclient-service.py \
+    "$pkgdir/usr/lib/NetworkManager/nm-gpclient-service"
+  install -D -m 0755 scripts/browser-wrapper.sh \
+    "$pkgdir/usr/libexec/gpclient/browser-wrapper"
+  install -D -m 0755 scripts/edge-wrapper.sh \
+    "$pkgdir/usr/libexec/gpclient/edge-wrapper"
+  # Compatibility symlink for the old path
+  mkdir -p "$pkgdir/usr/libexec/NetworkManager"
+  ln -s /usr/lib/NetworkManager/nm-gpclient-service \
+    "$pkgdir/usr/libexec/NetworkManager/gpclient-nm-service"
+
+  install -D -m 0644 config/nm-gpclient.service \
+    "$pkgdir/usr/lib/systemd/system/nm-gpclient.service"
+  install -D -m 0644 config/org.freedesktop.NetworkManager.gpclient.service \
+    "$pkgdir/usr/share/dbus-1/system-services/org.freedesktop.NetworkManager.gpclient.service"
+  install -D -m 0644 config/nm-gpclient.conf \
+    "$pkgdir/usr/share/dbus-1/system.d/nm-gpclient.conf"
+  install -D -m 0755 config/90-gpclient-routing \
+    "$pkgdir/etc/vpnc/connect.d/90-gpclient-routing"
+  # The same hook for disconnect: vpnc-script must see the edited route lists there too
+  install -D -m 0755 config/90-gpclient-routing \
+    "$pkgdir/etc/vpnc/disconnect.d/90-gpclient-routing"
+  # The hook that tells the service the tunnel is up: after vpnc-script configured
+  # it, and again on a reconnect
+  install -D -m 0755 config/gpclient-nm-notify \
+    "$pkgdir/etc/vpnc/post-connect.d/90-gpclient-notify"
+  install -D -m 0755 config/gpclient-nm-notify \
+    "$pkgdir/etc/vpnc/reconnect.d/90-gpclient-notify"
+  # What gpclient runs with --script when a profile has nm-routing=yes
+  install -D -m 0755 config/gpclient-nm-script \
+    "$pkgdir/usr/lib/NetworkManager/gpclient-nm-script"
+
+  install -D -m 0755 external/GlobalProtect-openconnect/target/release/gpclient \
+    "$pkgdir/usr/bin/gpclient"
+  install -D -m 0755 external/GlobalProtect-openconnect/target/release/gpauth \
+    "$pkgdir/usr/bin/gpauth"
+  # URL handler for globalprotectcallback://
+  install -D -m 0644 external/GlobalProtect-openconnect/packaging/files/usr/share/applications/gpgui.desktop \
+    "$pkgdir/usr/share/applications/gpgui.desktop"
+  # gpgui is not shipped: keep the MIME handler, hide the menu entry
+  sh scripts/hide-desktop-entry.sh "$pkgdir/usr/share/applications/gpgui.desktop"
+
+  python -m pip install --no-deps --no-index --no-user --ignore-installed \
+    --root "$pkgdir" --prefix /usr sdbus-wheel/sdbus-"$SDBUS_VERSION"-*.whl
+  # pip leaves files that name the build directory
+  rm -f "$pkgdir"/usr/lib/python3*/site-packages/sdbus-"$SDBUS_VERSION".dist-info/{direct_url.json,INSTALLER,REQUESTED}
+
+  test -x "$pkgdir/usr/bin/gpclient"
+  test -d "$pkgdir"/usr/lib/python3*/site-packages/sdbus
+  install -D -m 0644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -D -m 0644 LICENSE.GPL-3.0 "$pkgdir/usr/share/licenses/$pkgname/LICENSE.GPL-3.0"
+  install -D -m 0644 "$srcdir/sdbus-$SDBUS_VERSION/COPYING.LESSER" \
+    "$pkgdir/usr/share/licenses/$pkgname/COPYING.LESSER.python-sdbus"
+  install -D -m 0644 third-party-licenses.txt "$pkgdir/usr/share/licenses/$pkgname/third-party-licenses.txt"
+  install -D -m 0644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}
+
+package_network-manager-gpclient-gnome() {
+  pkgdesc='GNOME editor plugins for the GlobalProtect NetworkManager VPN'
+  license=(LGPL-2.1-only)
+  depends=("network-manager-gpclient=$pkgver-$pkgrel" python-gobject gtk3 gtk4 glib2 libnma libnma-gtk4)
+  cd "$pkgbase-$PROJECT_VERSION"
+
+  install -D -m 0644 plugins/gnome/libnm-vpn-plugin-gpclient-editor.so \
+    "$pkgdir/usr/lib/NetworkManager/libnm-vpn-plugin-gpclient-editor.so"
+  install -D -m 0644 plugins/gnome/libnm-gtk4-vpn-plugin-gpclient-editor.so \
+    "$pkgdir/usr/lib/NetworkManager/libnm-gtk4-vpn-plugin-gpclient-editor.so"
+  ln -s /usr/lib/NetworkManager/libnm-vpn-plugin-gpclient-editor.so \
+    "$pkgdir/usr/lib/libnm-gpclient-properties"
+  install -D -m 0755 auth-dialog/nm-gpclient-auth-dialog.py \
+    "$pkgdir/usr/libexec/nm-gpclient-auth-dialog"
+}
+
+package_network-manager-gpclient-plasma() {
+  pkgdesc='KDE Plasma 6 editor plugin for the GlobalProtect NetworkManager VPN'
+  license=(LGPL-2.1-only)
+  depends=("network-manager-gpclient=$pkgver-$pkgrel" plasma-nm ki18n kcoreaddons networkmanager-qt qt6-base glib2)
+  cd "$pkgbase-$PROJECT_VERSION"
+
+  make install-mo MO_DOMAIN=plasmanetworkmanagement_gpclientui DESTDIR="$pkgdir"
+  install -D -m 0644 plugins/plasma/build/plasmanetworkmanagement_gpclientui.so \
+    "$pkgdir/usr/lib/qt6/plugins/plasma/network/vpn/plasmanetworkmanagement_gpclientui.so"
+  install -D -m 0644 plugins/plasma/plasmanetworkmanagement_gpclientui.json \
+    "$pkgdir/usr/lib/qt6/plugins/plasma/network/vpn/plasmanetworkmanagement_gpclientui.json"
+}

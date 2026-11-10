@@ -111,6 +111,14 @@ rpm/build.sh fedora44 amd64     # targets: rpm/targets; output: output/fedora44-
 
 Details: [RPM_REPO.md](RPM_REPO.md).
 
+### Build Arch Linux packages:
+
+```bash
+arch/build.sh                  # output: output/arch-x86_64/ (x86_64 only)
+```
+
+Details: [ARCH_REPO.md](ARCH_REPO.md).
+
 ### Vendored crates and offline build:
 
 A package build needs no network for the Rust crates. `scripts/vendor-crates.sh` runs

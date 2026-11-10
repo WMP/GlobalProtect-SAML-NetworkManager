@@ -654,7 +654,7 @@ def test_a_missing_gpl_text_is_found(old, new):
 
 # `cargo build` and `cargo auditable build`
 CARGO_BUILD_RE = r"\bcargo\b\S* (?:auditable )?build\b"
-CARGO_BUILD_FILES = ("debian/rules", "Makefile", "rpm/network-manager-gpclient.spec")
+CARGO_BUILD_FILES = ("debian/rules", "Makefile", "rpm/network-manager-gpclient.spec", "arch/PKGBUILD")
 
 
 def cargo_build_lines(text):
@@ -742,14 +742,14 @@ def test_an_auditable_build_without_locked_or_with_features_is_reported():
 AUDITABLE_VERSION = r"cargo install cargo-auditable --locked --version \d+\.\d+\.\d+"
 
 
-@pytest.mark.parametrize("path", ["debian/rules", "rpm/network-manager-gpclient.spec"])
+@pytest.mark.parametrize("path", ["debian/rules", "rpm/network-manager-gpclient.spec", "arch/PKGBUILD"])
 def test_the_packages_are_built_with_cargo_auditable(path):
     # the binaries carry their dependency list (#159)
     lines = cargo_build_lines(read(path))
     assert lines and all("cargo auditable build" in line for line in lines)
 
 
-@pytest.mark.parametrize("path", ["debian/rules", "rpm/network-manager-gpclient.spec"])
+@pytest.mark.parametrize("path", ["debian/rules", "rpm/network-manager-gpclient.spec", "arch/PKGBUILD"])
 def test_a_plain_cargo_build_is_reported(path):
     lines = cargo_build_lines(read(path).replace("cargo auditable build", "cargo build"))
     assert [line for line in lines if "cargo auditable build" not in line]
@@ -776,6 +776,7 @@ def test_spec_neither_builds_nor_installs_nor_packages_gpservice():
     # nothing in this project starts gpservice: the callback path is gpclient launch-gui -> gpauth
     assert "gpservice" not in read("rpm/network-manager-gpclient.spec")
     assert "gpservice" not in read("rpm/install-test.sh")
+    assert "gpservice" not in read("arch/PKGBUILD")
 
 
 def provides_exclude_pattern():

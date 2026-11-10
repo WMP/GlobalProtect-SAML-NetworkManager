@@ -56,11 +56,12 @@ def release_problems(text):
     """What is wrong with the vendoring in build-release.yml"""
     problems = []
     vendor = [m.start() for m in re.finditer(r"bash scripts/vendor-crates\.sh", text)]
-    if len(vendor) != 2:
-        problems.append("expected 2 vendor steps (Debian and RPM), found %d" % len(vendor))
+    if len(vendor) != 3:
+        problems.append("expected 3 vendor steps (Debian, RPM and Arch Linux), found %d" % len(vendor))
     else:
-        if not vendor[0] < text.find("docker build ") < vendor[1] < text.find("bash rpm/build.sh"):
-            problems.append("the crates are not vendored before the Debian image and the RPM build")
+        if not (vendor[0] < text.find("docker build ") < vendor[1] < text.find("bash rpm/build.sh")
+                < vendor[2] < text.find("bash arch/build.sh")):
+            problems.append("the crates are not vendored before the Debian image, the RPM build and the Arch Linux build")
     if not re.search(r"docker run --rm --network none -e PR_SUFFIX=", text):
         problems.append("the Debian build container does not run with --network none")
     return problems
@@ -112,6 +113,7 @@ def test_spec_mutations_are_rejected(old, new):
     [
         ("docker run --rm --network none -e", "docker run --rm -e"),
         ("bash rpm/build.sh", "bash rpm/build2.sh"),
+        ("bash arch/build.sh", "bash arch/build2.sh"),
     ],
 )
 def test_release_mutations_are_rejected(old, new):
@@ -308,3 +310,32 @@ def test_a_dh_clean_without_the_exclusion_is_found(old, new):
     assert old in rules
 
     assert not DH_CLEAN_RE.search(rules.replace(old, new, 1))
+
+
+def pkgbuild_problems(text):
+    """What is wrong with the conditional offline flags of arch/PKGBUILD"""
+    problems = []
+    if not re.search(r'if \[ -f "\$PWD/vendor/config\.toml" \]; then\n\s*vendor_flags=\(--offline --config "\$PWD/vendor/config\.toml"\)\n\s*fi', text):
+        problems.append("vendor_flags is not set only when vendor/config.toml exists")
+    build = [l for l in text.splitlines() if "cargo auditable build" in l]
+    if len(build) != 1 or '--locked "${vendor_flags[@]}"' not in build[0]:
+        problems.append("the cargo build does not use --locked and the vendor flags")
+    return problems
+
+
+def test_pkgbuild_uses_vendored_crates_when_present():
+    assert pkgbuild_problems(read("arch", "PKGBUILD")) == []
+
+
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        ('if [ -f "$PWD/vendor/config.toml" ]; then', "if true; then"),
+        ("--offline --config", "--config"),
+        ('--locked "${vendor_flags[@]}"', "--locked"),
+    ],
+)
+def test_pkgbuild_mutations_are_rejected(old, new):
+    text = read("arch", "PKGBUILD")
+    assert old in text
+    assert pkgbuild_problems(text.replace(old, new)) != []
