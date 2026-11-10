@@ -139,7 +139,10 @@ def test_real_changelog_converts():
 
 def test_cli_version_and_release():
     top = re.match(r"^\S+ \((\S+)\) ", open(CHANGELOG, encoding="utf-8").read()).group(1)
-    version, revision = top.rsplit("-", 1)
+    # A native version (2.0.0) has no revision: the RPM release is 1
+    version, _, revision = top.rpartition("-")
+    if not version:
+        version, revision = top, "1"
     assert run("version").stdout.strip() == version
     assert run("release").stdout.strip() == revision
 

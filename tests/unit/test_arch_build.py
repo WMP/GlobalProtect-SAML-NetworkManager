@@ -335,7 +335,9 @@ def sandbox(tmp_path):
 
 def top_version():
     top = re.match(r"^\S+ \((\S+)\) ", read("debian/changelog")).group(1)
-    return top.rsplit("-", 1)
+    # A native version (2.0.0) has no revision: the pkgrel is 1
+    version, _, revision = top.rpartition("-")
+    return (version, revision) if version else (top, "1")
 
 
 def good_pkgs(pkgver, pkgrel, arch="x86_64"):
@@ -417,7 +419,10 @@ def test_build_rejects_too_many_arguments(sandbox, args):
 def test_build_rejects_a_debian_revision_that_is_not_an_integer(sandbox):
     changelog = sandbox[0] / "debian" / "changelog"
     text = changelog.read_text()
-    changelog.write_text(re.sub(r"^(\S+ \(\S+)-\d+\)", r"\1-1ubuntu1)", text, count=1, flags=re.M))
+    # The top entry with a revision that is not an integer, native (2.0.0) or not (1.5.0-1)
+    changed = re.sub(r"^(\S+ \([^)\s-]+)(?:-\d+)?\)", r"\1-1ubuntu1)", text, count=1, flags=re.M)
+    assert changed != text
+    changelog.write_text(changed)
 
     result = build(sandbox, str(sandbox[3] / "out"))
 
