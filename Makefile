@@ -271,6 +271,7 @@ test-coverage:
 # (tests/unit/test_shellcheck.py checks the list).
 SHELL_SCRIPTS := \
 	.github/scripts/build-apt-repo.sh \
+	.github/scripts/build-arch-repo.sh \
 	.github/scripts/build-rpm-repo.sh \
 	.github/scripts/gui-smoke.sh \
 	.github/scripts/neon-repo.sh \

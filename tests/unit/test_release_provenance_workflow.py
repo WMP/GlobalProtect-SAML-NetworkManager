@@ -51,10 +51,10 @@ def test_attestation_is_skipped_where_the_token_cannot_write(step):
 
 def test_only_the_package_jobs_and_the_release_job_get_attestation_rights():
     text = read_workflow(WORKFLOW)
-    assert text.count("attestations: write") == 3 and text.count("id-token: write") == 4
+    assert text.count("attestations: write") == 4 and text.count("id-token: write") == 5
     assert "      contents: write\n      id-token: write\n      attestations: write\n" in job_block("release")
     assert "contents: read\n\n# A new push" in text or "permissions:\n  contents: read\n" in text
-    for job in ("build", "build-rpm"):
+    for job in ("build", "build-rpm", "build-arch"):
         block = job_block(job)
         assert "      contents: read\n      id-token: write\n      attestations: write\n" in block
         assert "contents: write" not in block
@@ -166,6 +166,7 @@ def test_sha256sums_covers_every_package_under_the_name_of_the_asset(tmp_path):
         "network-manager-gpclient_2.0.0-1~noble1_amd64.deb": b"deb",
         "network-manager-gpclient-gnome_2.0.0-1~jammy1_arm64.deb": b"deb2",
         "network-manager-gpclient-2.0.0-1.fc44.x86_64.rpm": b"rpm",
+        "network-manager-gpclient-plasma-2.0.0-1-x86_64.pkg.tar.zst": b"arch",
     }
     out, result = run_sums(tmp_path, files)
     assert result.returncode == 0, result.stderr
@@ -177,4 +178,14 @@ def test_sha256sums_covers_every_package_under_the_name_of_the_asset(tmp_path):
 
 def test_sha256sums_fails_without_packages(tmp_path):
     out, result = run_sums(tmp_path, {"notes.txt": b"x"})
+    assert result.returncode != 0
+
+
+def test_sha256sums_fails_when_a_format_has_no_package(tmp_path):
+    # a release has all its packages or is not made: no Arch Linux package is no release
+    files = {
+        "network-manager-gpclient_2.0.0-1~noble1_amd64.deb": b"deb",
+        "network-manager-gpclient-2.0.0-1.fc44.x86_64.rpm": b"rpm",
+    }
+    _out, result = run_sums(tmp_path, files)
     assert result.returncode != 0

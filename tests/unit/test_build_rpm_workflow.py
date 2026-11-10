@@ -404,7 +404,7 @@ class TestRelease:
     def test_the_release_waits_for_both_builds(self):
         job = job_text("release")
 
-        assert "needs: [build, build-rpm, sbom]" in job
+        assert "needs: [build, build-rpm, build-arch, sbom]" in job
 
     def test_the_release_job_collects_and_uploads_debs_and_rpms_and_needs_both(self):
         job = job_text("release")
