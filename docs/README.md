@@ -28,7 +28,7 @@ sudo dpkg -i <downloaded-packages>.deb
 sudo apt-get install -f  # install dependencies
 ```
 
-Fedora, RHEL 10 and openSUSE: see [RPM_REPO.md](RPM_REPO.md).
+Fedora, RHEL 10 and openSUSE: see [RPM_REPO.md](RPM_REPO.md). Arch Linux: see [ARCH_REPO.md](ARCH_REPO.md).
 
 ### Building from Source
 

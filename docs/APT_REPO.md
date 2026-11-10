@@ -74,7 +74,7 @@ sudo apt update
 
 Every release after v1.5.0 has a `SHA256SUMS` asset and a build provenance
 attestation (SLSA, signed through Sigstore) for `SHA256SUMS` and for each `.deb`
-and `.rpm` file. The attestation names the workflow run of this repository that
+`.rpm` and `.pkg.tar.zst` file. The attestation names the workflow run of this repository that
 built the file. To check a file you downloaded from a GitHub release (replace
 `vX.Y.Z` with the tag of that release):
 
@@ -93,7 +93,7 @@ file of a pull request build, would also pass.
 
 `publish-apt.yml` verifies the attestation of `SHA256SUMS` of every release (one
 API call per release) and the SHA256 of every package against it before it signs
-the package into the apt and RPM repositories: a failure, or a release without
+the package into the apt, RPM and pacman repositories: a failure, or a release without
 `SHA256SUMS`, stops the run. Only the releases listed in
 `.github/legacy-unattested-releases.txt` (v1.5.0 and older) are published without
 the checks. The attestation must come from `build-release.yml` and the tag of the

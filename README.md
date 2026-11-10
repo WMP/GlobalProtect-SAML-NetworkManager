@@ -120,6 +120,31 @@ RHEL 10 and its rebuilds, removal, and what differs from the Ubuntu packages:
 [docs/RPM_REPO.md](docs/RPM_REPO.md). The packages contain the Python module
 `sdbus`; do not install it with pip.
 
+### Arch Linux
+
+A pacman repository for Arch Linux, `x86_64` only. Trust the key once, then add the repository:
+
+```bash
+curl -fsSLo /tmp/gpclient.gpg https://wmp.github.io/GlobalProtect-SAML-NetworkManager/arch/GPG-KEY-gpclient
+sudo pacman-key --add /tmp/gpclient.gpg
+sudo pacman-key --lsign-key "$(gpg --show-keys --with-colons /tmp/gpclient.gpg | awk -F: '/^fpr:/ {print $10; exit}')"
+
+sudo tee -a /etc/pacman.conf > /dev/null <<'EOF'
+
+[gpclient]
+SigLevel = Required
+Server = https://wmp.github.io/GlobalProtect-SAML-NetworkManager/arch/$arch
+EOF
+sudo pacman -Syu network-manager-gpclient-gnome     # or network-manager-gpclient-plasma (Plasma 6)
+```
+
+Compare the key's fingerprint with the one on the
+[landing page](https://wmp.github.io/GlobalProtect-SAML-NetworkManager/) first.
+Removal, single files, and what differs from the Ubuntu packages:
+[docs/ARCH_REPO.md](docs/ARCH_REPO.md). Arch Linux ARM is not supported. The
+package contains the Python module `sdbus`; do not install it with pip. It
+conflicts with the AUR package `globalprotect-openconnect(-git)`.
+
 ### Migrating from `globalprotect-openconnect`
 
 If you previously had the `globalprotect-openconnect` package installed,
@@ -524,6 +549,7 @@ Remove the file when you are done: `sudo rm /usr/local/sbin/vpnc-script-debug`.
 - [docs/README.md](docs/README.md) - Full documentation
 - [docs/APT_REPO.md](docs/APT_REPO.md) - apt repository: using it, releasing, key rotation
 - [docs/RPM_REPO.md](docs/RPM_REPO.md) - RPM packages and repositories (Fedora, RHEL 10, openSUSE)
+- [docs/ARCH_REPO.md](docs/ARCH_REPO.md) - Arch Linux packages and pacman repository
 - [docs/EDGE_WRAPPER.md](docs/EDGE_WRAPPER.md) - Browser wrapper and browser integration
 - [docs/PYTHON_SERVICE.md](docs/PYTHON_SERVICE.md) - Service implementation details
 - [docs/INTERACTIVE_AUTH.md](docs/INTERACTIVE_AUTH.md) - Standard login / RSA token / OTP authentication, gateway selection
