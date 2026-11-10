@@ -271,11 +271,16 @@ test-coverage:
 # (tests/unit/test_shellcheck.py checks the list).
 SHELL_SCRIPTS := \
 	.github/scripts/build-apt-repo.sh \
+	.github/scripts/build-arch-repo.sh \
 	.github/scripts/build-rpm-repo.sh \
 	.github/scripts/gui-smoke.sh \
 	.github/scripts/neon-repo.sh \
 	.github/scripts/upgrade-test.sh \
 	.github/scripts/verify-release-assets.sh \
+	arch/build.sh \
+	arch/container-build.sh \
+	arch/install-test.sh \
+	arch/network-manager-gpclient.install \
 	build-all.sh \
 	config/90-gpclient-routing \
 	config/gpclient-nm-notify \

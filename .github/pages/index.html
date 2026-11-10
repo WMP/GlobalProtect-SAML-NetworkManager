@@ -37,6 +37,9 @@
 <!-- RPM-BEGIN -->
 and RPM repository for Fedora, EL&nbsp;10 and openSUSE
 <!-- RPM-END -->
+<!-- ARCH-BEGIN -->
+and pacman repository for Arch&nbsp;Linux
+<!-- ARCH-END -->
 &mdash; SAML/SSO GlobalProtect connections in GNOME&nbsp;Settings and KDE&nbsp;Plasma.</p>
 
 <h2>Install on Ubuntu</h2>
@@ -109,6 +112,29 @@ sudo zypper install network-manager-gpclient-gnome</code></pre>
 <a href="rpm/RPM-GPG-KEY-gpclient"><code>rpm/RPM-GPG-KEY-gpclient</code></a>.</p>
 <!-- RPM-END -->
 
+<!-- ARCH-BEGIN -->
+<h2>Install on Arch&nbsp;Linux</h2>
+
+<p>Every package and the repository database are signed. Add the key to pacman first,
+then the repository (x86_64 only).</p>
+
+<pre><code>sudo curl -fsSLo /tmp/gpclient.gpg __REPO_URL__/arch/GPG-KEY-gpclient
+sudo pacman-key --add /tmp/gpclient.gpg
+sudo pacman-key --lsign-key __FINGERPRINT__
+
+sudo tee -a /etc/pacman.conf &gt; /dev/null &lt;&lt;'EOF'
+
+[gpclient]
+SigLevel = Required
+Server = __REPO_URL__/arch/$arch
+EOF
+
+sudo pacman -Syu network-manager-gpclient-gnome    # or network-manager-gpclient-plasma (KDE Plasma 6)</code></pre>
+
+<p>Newest version: <code>__ARCH_VERSION__</code>. The public key is
+<a href="arch/GPG-KEY-gpclient"><code>arch/GPG-KEY-gpclient</code></a>.</p>
+<!-- ARCH-END -->
+
 <h2>Uninstall</h2>
 
 <pre><code># the desktop packages depend on the core package and are removed with it
@@ -121,6 +147,12 @@ sudo apt update</code></pre>
 (<code>sudo zypper remove network-manager-gpclient</code> on openSUSE), then remove
 <code>/etc/yum.repos.d/network-manager-gpclient.repo</code> or the zypper repository.</p>
 <!-- RPM-END -->
+
+<!-- ARCH-BEGIN -->
+<p>Arch Linux: <code>sudo pacman -Rs network-manager-gpclient-gnome network-manager-gpclient</code>
+(or the plasma package), then remove the <code>[gpclient]</code> section from
+<code>/etc/pacman.conf</code>.</p>
+<!-- ARCH-END -->
 
 <h2>Signing key</h2>
 

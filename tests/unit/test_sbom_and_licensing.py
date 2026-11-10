@@ -94,7 +94,7 @@ def sbom_job_text():
 
 def test_release_job_uploads_the_sbom_next_to_sha256sums():
     job = release_job_text()
-    assert "\n    needs: [build, build-rpm, sbom]\n" in job
+    assert "\n    needs: [build, build-rpm, build-arch, sbom]\n" in job
     assert f"            release-files/{SBOM}\n" in job
     assert "            release-files/SHA256SUMS\n" in job
     assert "fail_on_unmatched_files: true" in job
@@ -125,7 +125,7 @@ def test_sbom_step_uses_the_lock_file_and_its_file_is_uploaded():
 def test_sbom_is_not_in_sha256sums():
     # SHA256SUMS lists the packages only: publish-apt checks every package against it
     script = "\n".join(step_lines(RELEASE, "Write SHA256SUMS"))
-    assert "sha256sum -- *.deb *.rpm > SHA256SUMS" in script
+    assert "sha256sum -- *.deb *.rpm *.pkg.tar.zst > SHA256SUMS" in script
     assert "sbom" not in script
 
 
@@ -308,7 +308,7 @@ def sbom_upload_problems(text):
     start = text.index("\n  release:\n") + 1
     job = text[start:text.index("\n  release-notes:\n")]
     problems = []
-    if "\n    needs: [build, build-rpm, sbom]\n" not in job:
+    if "\n    needs: [build, build-rpm, build-arch, sbom]\n" not in job:
         problems.append("release does not need sbom")
     if f"            release-files/{SBOM}\n" not in job:
         problems.append("sbom not uploaded")
@@ -357,7 +357,7 @@ TAG_ONLY = "    if: startsWith(github.ref, 'refs/tags/') && github.event_name ==
 @pytest.mark.parametrize(
     "check, old, new",
     [
-        (sbom_upload_problems, "needs: [build, build-rpm, sbom]", "needs: [build, build-rpm]"),
+        (sbom_upload_problems, "needs: [build, build-rpm, build-arch, sbom]", "needs: [build, build-rpm, build-arch]"),
         (sbom_upload_problems, f"            release-files/{SBOM}\n", ""),
         (sbom_tag_problems, SBOM_JOB_HEAD + TAG_ONLY, SBOM_JOB_HEAD),
     ],

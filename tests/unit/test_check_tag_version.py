@@ -101,7 +101,7 @@ def test_the_repository_changelog_gives_a_valid_tag():
 def test_the_workflow_checks_the_tag_before_building():
     text = workflow_steps.read_workflow("build-release.yml")
     assert "python3 .github/scripts/check_tag_version.py" in text
-    assert text.count("needs: check-tag") == 2
+    assert text.count("needs: check-tag") == 3
 
 
 def run_step(event, ref, tag):

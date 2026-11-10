@@ -67,6 +67,32 @@ def test_each_package_names_the_licenses_of_its_files():
     assert package_licenses(read(SPEC)) == EXPECTED
 
 
+PKGBUILD = os.path.join(ROOT, "arch", "PKGBUILD")
+
+
+def pkgbuild_core_licenses(text):
+    """The SPDX IDs of the license=(...) array of the PKGBUILD (the core package, and the default)"""
+    array = re.search(r"^license=\((.*?)\)", text, re.M | re.S)
+    return set(array.group(1).split()) if array else set()
+
+
+def test_the_pkgbuild_core_license_is_the_one_of_the_spec():
+    assert pkgbuild_core_licenses(read(PKGBUILD)) == package_licenses(read(SPEC))[""]
+
+
+@pytest.mark.parametrize("old, new", [
+    (" BSD-2-Clause", ""),  # a license of the crates left out
+    ("LGPL-2.1-only LGPL-2.0-or-later", "LGPL-2.1-only"),
+    ("license=(GPL-3.0-only", "license=(GPL-3.0-or-later"),
+    (" 0BSD)", " 0BSD Other)"),
+])
+def test_a_pkgbuild_license_that_differs_from_the_spec_is_found(old, new):
+    text = read(PKGBUILD)
+    assert old in text
+
+    assert pkgbuild_core_licenses(text.replace(old, new, 1)) != package_licenses(read(SPEC))[""]
+
+
 def test_the_packages_name_every_license_of_debian_copyright():
     assert set().union(*EXPECTED.values()) == copyright_licenses(read(COPYRIGHT))
 

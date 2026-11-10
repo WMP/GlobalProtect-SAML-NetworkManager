@@ -37,6 +37,11 @@ RPMS = [
     "network-manager-gpclient-gnome-1.4.2-1.fc44.pr24.57.x86_64.rpm",
 ]
 
+ARCHS = [
+    "network-manager-gpclient-1.4.2.pr24.57-1-x86_64.pkg.tar.zst",
+    "network-manager-gpclient-gnome-1.4.2.pr24.57-1-x86_64.pkg.tar.zst",
+]
+
 FAKE_GH = r"""#!/bin/bash
 echo "$*" >> "$FAKE_DIR/gh_calls"
 case "$1 $2" in
@@ -199,6 +204,19 @@ class TestRenderTheCheck:
         assert check["conclusion"] == "success"
         assert f"Published packages ({len(RPMS)} files, network-manager-gpclient" in check["output"]["summary"]
 
+    def test_the_arch_packages_of_the_upload_directory_are_part_of_the_check(self, box):
+        check = self.render(box, "publish", "success", "true", debs=DEBS + ARCHS)
+
+        assert check["conclusion"] == "success"
+        assert f"Published packages ({len(DEBS) + len(ARCHS)} files" in check["output"]["summary"]
+        assert f"- `{ARCHS[0]}`" in check["output"]["summary"]
+        assert "pacman -U" in check["output"]["summary"]
+
+    def test_the_check_of_a_release_without_arch_packages_has_nothing_about_pacman(self, box):
+        check = self.render(box, "publish", "success", "true", debs=DEBS + RPMS)
+
+        assert "pacman" not in check["output"]["summary"]
+
     def test_another_repository_is_named_in_the_command(self, box):
         (box.work / "upload").mkdir()
         (box.work / "upload" / DEBS[0]).write_text("x")
@@ -328,6 +346,29 @@ class TestDownload:
         assert result.stderr.count("skipping a package with an unexpected file name") == 4
         gh_calls = (box.fake / "gh_calls").read_text()
         assert "--pattern debs-*" in gh_calls and "--pattern rpms-*" in gh_calls
+
+    def test_the_arch_artifact_is_downloaded_and_only_plain_arch_names_are_uploaded(self, box):
+        self.artifacts(box, {
+            "debs-ubuntu-24.04-amd64": DEBS,
+            "arch-x86_64": ARCHS + [ARCHS[0] + ".sig", "network-manager-gpclient-debug-1.4.2-1-x86_64.pkg.tar.zst",
+                                    "evil;rm.pkg.tar.zst"],
+        })
+
+        result = box.run(self.STEP)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert sorted(os.listdir(box.work / "upload")) == sorted(DEBS + ARCHS)
+        assert result.stderr.count("skipping a package with an unexpected file name") == 2
+        assert "--pattern arch-*" in (box.fake / "gh_calls").read_text()
+
+    def test_arch_files_that_are_not_plain_are_not_enough(self, box):
+        self.artifacts(box, {"arch-x86_64": ["a b.pkg.tar.zst", "x.pkg.tar.zst"]})
+
+        result = box.run(self.STEP)
+
+        assert result.returncode != 0
+        assert "no packages found" in result.stderr
+        assert not (box.work / "upload").exists()
 
     def test_rpms_that_are_not_plain_are_not_enough(self, box):
         self.artifacts(box, {"rpms-x": ["a b.rpm", "x.rpm", "network-manager-gpclient-1.4.2-1.fc44.src.rpm"]})

@@ -83,9 +83,11 @@ class Box:
         self.write_index()
 
     def write_index(self):
-        """The page as build-apt-repo.sh leaves it: only the RPM part is still to do"""
+        """The page as build-apt-repo.sh leaves it: only the RPM part is still to do (the Arch Linux
+        part, done after it by build-arch-repo.sh, is left out here)"""
         with open(TEMPLATE, encoding="utf-8") as handle:
             text = handle.read()
+        text = re.sub(r"<!-- ARCH-BEGIN -->.*?<!-- ARCH-END -->\n?", "", text, flags=re.S)
         text = (text.replace("__VERSION_ROWS__", "<tr><td>noble</td><td>1.5.0-1~noble1</td></tr>")
                 .replace("__FINGERPRINT__", KEY).replace("__UPDATED__", "now")
                 .replace("__REPO_URL__", "https://wmp.github.io/GlobalProtect-SAML-NetworkManager"))

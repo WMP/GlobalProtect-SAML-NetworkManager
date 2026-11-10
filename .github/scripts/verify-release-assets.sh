@@ -1,10 +1,10 @@
 #!/bin/bash
-# Verify the packages of one release before they are signed into the apt and
-# RPM repositories.
+# Verify the packages of one release before they are signed into the apt, RPM and
+# pacman repositories.
 #
 #   verify-release-assets.sh <tag> <directory> [<legacy tags file>]
 #
-# <directory> holds the .deb and .rpm assets of the release <tag> and, if the
+# <directory> holds the .deb, .rpm and .pkg.tar.zst assets of the release <tag> and, if the
 # release has one, its SHA256SUMS asset. Two steps, one GitHub API call:
 #   1. `gh attestation verify SHA256SUMS --repo $GITHUB_REPOSITORY` succeeds,
 #      with the signer workflow build-release.yml and the source ref
@@ -47,8 +47,8 @@ gh attestation verify "$sums" --repo "$repo" \
     || die "no valid build provenance for SHA256SUMS (gh attestation verify failed)"
 
 shopt -s nullglob
-files=("$dir"/*.deb "$dir"/*.rpm)
-[ "${#files[@]}" -gt 0 ] || die "no .deb or .rpm files in $dir"
+files=("$dir"/*.deb "$dir"/*.rpm "$dir"/*.pkg.tar.zst)
+[ "${#files[@]}" -gt 0 ] || die "no .deb, .rpm or .pkg.tar.zst files in $dir"
 
 for file in "${files[@]}"; do
     name="$(basename "$file")"

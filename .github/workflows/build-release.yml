@@ -38,6 +38,12 @@ on:
           - "leap16.1"
           - "tumbleweed"
           - "all"
+      # Arch Linux packages (x86_64 only): a manual run builds them only when asked
+      arch_linux:
+        description: "Build the Arch Linux packages"
+        required: true
+        default: false
+        type: boolean
 
 # Read-only by default (pull requests run the build); only the release job
 # gets write access.
@@ -85,7 +91,7 @@ jobs:
     # arm64 packages, the amd64 one amd64 packages.
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
-    # Only this job and build-rpm write attestations (build provenance of the
+    # Only this job, build-rpm and build-arch write attestations (build provenance of the
     # package files); everything else stays read-only.
     permissions:
       contents: read
@@ -478,6 +484,126 @@ jobs:
             -v "$PWD/rpm:/rpm:ro" \
             "$image" bash /rpm/install-test.sh /rpms
 
+  # Arch Linux packages (x86_64 only: official Arch Linux has no arm64): built in
+  # a fresh archlinux container (arch/build.sh), then installed in another one
+  # (arch/install-test.sh). A manual run builds them only with the input arch_linux.
+  build-arch:
+    needs: check-tag
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.arch_linux == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+
+      - name: Vendor the crates
+        # The package build needs no network for cargo: the crates are in vendor/
+        # (cargo vendor of Cargo.lock) and cargo runs --offline (arch/PKGBUILD)
+        run: |
+          cargo --version
+          bash scripts/vendor-crates.sh
+
+      - name: Build Arch Linux packages
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -e
+
+          # A pull request's packages get the version <version>.pr<PR>.<run>
+          # (1.5.0.pr24.57-1 sorts after the release 1.5.0-1 and after every
+          # earlier release, like the debs' and RPMs' markers). Only numbers go into it, checked here and again by
+          # arch/build.sh. Other builds have neither number.
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if ! [[ "$PR_NUMBER" =~ ^[1-9][0-9]{0,6}$ && "$RUN_NUMBER" =~ ^[1-9][0-9]{0,9}$ ]]; then
+              echo "ERROR: unexpected pull request or run number: '$PR_NUMBER' '$RUN_NUMBER'"
+              exit 1
+            fi
+            export PR_NUMBER RUN_NUMBER
+          else
+            unset PR_NUMBER RUN_NUMBER
+          fi
+
+          bash arch/build.sh output/arch-x86_64
+
+      - name: Verify .pkg.tar.zst files
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -e
+          out=output/arch-x86_64
+
+          # <package>-<version>[.pr<PR>.<run>]-<pkgrel>-x86_64.pkg.tar.zst, for a
+          # pull request with its own numbers (what scripts/install-pr-build.sh
+          # expects), and never on a release build
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            suffix_re="[.]pr${PR_NUMBER}[.]${RUN_NUMBER}"
+          else
+            suffix_re=""
+          fi
+          name_re="^(network-manager-gpclient(-gnome|-plasma)?)-[0-9][A-Za-z0-9._+]*${suffix_re}-[0-9]+-x86_64[.]pkg[.]tar[.]zst$"
+
+          shopt -s nullglob
+          files=("$out"/*)
+          if [ "${#files[@]}" -ne 3 ]; then
+            echo "ERROR: expected exactly 3 files in $out, found ${#files[@]}:"
+            ls -la "$out"
+            exit 1
+          fi
+          seen=""
+          for file in "${files[@]}"; do
+            base=$(basename "$file")
+            if ! [[ "$base" =~ $name_re ]]; then
+              echo "ERROR: $base does not match the expected name '$name_re'"
+              exit 1
+            fi
+            seen="$seen ${BASH_REMATCH[1]}"
+            # A release build must have no pull request marker
+            if [ -z "$suffix_re" ] && [[ "$base" =~ [.]pr[0-9]+[.][0-9]+-[0-9]+-x86_64 ]]; then
+              echo "ERROR: $base has a pull request marker, but this is not a pull request build"
+              exit 1
+            fi
+          done
+          expected="network-manager-gpclient network-manager-gpclient-gnome network-manager-gpclient-plasma"
+          if [ "$(printf '%s\n' $seen | sort | tr '\n' ' ')" != "$expected " ]; then
+            echo "ERROR: expected the packages '$expected', found '${seen# }'"
+            exit 1
+          fi
+          echo "Built packages:"
+          ls -la "$out"
+
+      - name: Attest build provenance of the .pkg.tar.zst files
+        # Same condition as for the .deb files
+        if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: output/arch-x86_64/*.pkg.tar.zst
+
+      - name: Upload Arch Linux artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: arch-x86_64
+          path: output/arch-x86_64/*.pkg.tar.zst
+
+      - name: Install test of the Arch Linux packages
+        # Not for tags (the only push trigger), like the RPM install test: a
+        # network flake in a check must not block a release. Installs the
+        # packages built above in a fresh archlinux container and checks them
+        # (arch/install-test.sh).
+        if: github.event_name != 'push'
+        run: |
+          bash arch/build.sh --install-test output/arch-x86_64
+
   # One CycloneDX SBOM of the Rust dependencies that gpclient and gpauth are
   # built from (the same Cargo.lock for every package), once per release. It is
   # made from the lock file: no build and no network. It is not in SHA256SUMS:
@@ -512,7 +638,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [build, build-rpm, sbom]
+    needs: [build, build-rpm, build-arch, sbom]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: startsWith(github.ref, 'refs/tags/') && github.event_name == 'push'
@@ -532,10 +658,11 @@ jobs:
           # Filenames already carry the release codename in the version
           # and the architecture (network-manager-gpclient_1.4.0-1~noble1_amd64.deb),
           # the RPMs carry the dist tag and the architecture
-          # (network-manager-gpclient-1.4.0-1.fc44.x86_64.rpm), so no renaming is
-          # needed to keep them unique across all builds.
+          # (network-manager-gpclient-1.4.0-1.fc44.x86_64.rpm), the Arch Linux
+          # packages the architecture (network-manager-gpclient-1.4.0-1-x86_64.pkg.tar.zst),
+          # so no renaming is needed to keep them unique across all builds.
           mkdir -p release-files
-          find artifacts \( -name '*.deb' -o -name '*.rpm' -o -name 'sbom-rust.cdx.json' \) -exec cp {} release-files/ \;
+          find artifacts \( -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.zst' -o -name 'sbom-rust.cdx.json' \) -exec cp {} release-files/ \;
           echo "Release files:"
           ls -la release-files/
 
@@ -545,7 +672,7 @@ jobs:
           # the "~" of a version into "." (so `sha256sum -c SHA256SUMS` works in
           # the download directory). publish-apt checks every package against it.
           cd release-files
-          sha256sum -- *.deb *.rpm > SHA256SUMS
+          sha256sum -- *.deb *.rpm *.pkg.tar.zst > SHA256SUMS
           sed -i 's/~/./g' SHA256SUMS
           cat SHA256SUMS
 
@@ -562,6 +689,7 @@ jobs:
           files: |
             release-files/*.deb
             release-files/*.rpm
+            release-files/*.pkg.tar.zst
             release-files/SHA256SUMS
             release-files/sbom-rust.cdx.json
           generate_release_notes: true

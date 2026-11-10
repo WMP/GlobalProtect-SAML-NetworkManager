@@ -1,10 +1,10 @@
 name: Publish APT repository
 
-# Publishes the apt repository and the RPM repositories (under /rpm) to GitHub
-# Pages. The file keeps its name: build-release.yml and the docs call it.
+# Publishes the apt repository, the RPM repositories (under /rpm) and the pacman
+# repository (under /arch) to GitHub Pages. The file keeps its name: build-release.yml and the docs call it.
 #
 # GitHub Releases are the source of truth: every run rebuilds the whole
-# repositories from the .deb and .rpm assets of all published releases, so the run is
+# repositories from the .deb, .rpm and .pkg.tar.zst assets of all published releases, so the run is
 # idempotent and the repository can be recreated from scratch at any time
 # (after a key rotation, for example). Nothing is committed to the repo.
 #
@@ -102,6 +102,12 @@ jobs:
             else
               echo "::warning::$tag has no .rpm assets"
             fi
+            # Releases before the Arch Linux packages have none
+            if grep -q '\.pkg\.tar\.zst$' <<< "$assets"; then
+              gh release download "$tag" -D "verify/$tag" --pattern '*.pkg.tar.zst'
+            else
+              echo "::warning::$tag has no .pkg.tar.zst assets"
+            fi
             # Releases after v1.5.0 have a SHA256SUMS asset; the legacy ones
             # (.github/legacy-unattested-releases.txt) do not.
             if grep -qx 'SHA256SUMS' <<< "$assets"; then
@@ -110,7 +116,7 @@ jobs:
             # Attested SHA256SUMS and the checksum of every package: a failure
             # stops the run before anything is signed.
             bash .github/scripts/verify-release-assets.sh "$tag" "verify/$tag"
-            find "verify/$tag" \( -name '*.deb' -o -name '*.rpm' \) -exec cp {} incoming/ \;
+            find "verify/$tag" \( -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.zst' \) -exec cp {} incoming/ \;
             echo "::endgroup::"
           done < tags.txt
           ls -la incoming
@@ -130,6 +136,12 @@ jobs:
       # argument.
       - name: Build the RPM repositories
         run: bash .github/scripts/build-rpm-repo.sh --index site/index.html --allow-empty incoming site/rpm "$APT_GPG_KEY"
+
+      # After the RPM repositories, for the same reason: the landing page gets the
+      # Arch Linux part here (or loses it when no release has Arch packages).
+      # repo-add runs in an archlinux container, the signing key is the one imported above.
+      - name: Build the pacman repository
+        run: bash .github/scripts/build-arch-repo.sh --index site/index.html --allow-empty incoming site/arch "$APT_GPG_KEY"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

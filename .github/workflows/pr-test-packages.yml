@@ -3,7 +3,7 @@ name: PR test packages
 # Makes the packages built for a pull request installable, and says how in the
 # pull request's checks:
 #
-#   * "Build and Release" finished for a pull request: its .deb and .rpm files go to the
+#   * "Build and Release" finished for a pull request: its .deb, .rpm and Arch Linux files go to the
 #     prerelease pr-<N> and a check run named "Test packages" is added to the
 #     head commit. Its title (shown in the merge box, next to the check) is the
 #     install command, its summary says what the command does and how to go
@@ -22,7 +22,7 @@ name: PR test packages
 #
 # Security: this runs in the context of the base repository with a write token,
 # for pull requests from forks as well. So it never checks out or runs code of
-# the pull request. The only things taken from it are the .deb and .rpm files of the
+# the pull request. The only things taken from it are the .deb, .rpm and .pkg.tar.zst files of the
 # build artifact, treated as data (plain file names only, never executed here),
 # and only for pull requests from this very repository: a fork's packages are
 # not published under this repository's name. The scripts come from the default
@@ -131,7 +131,7 @@ jobs:
       - name: Download the built packages
         if: steps.plan.outputs.state == 'publish'
         run: |
-          gh run download "$RUN_ID" --repo "$REPO" --pattern 'debs-*' --pattern 'rpms-*' --dir artifacts
+          gh run download "$RUN_ID" --repo "$REPO" --pattern 'debs-*' --pattern 'rpms-*' --pattern 'arch-*' --dir artifacts
           # Plain package names only: they end up in a URL, a release and a
           # check. The script owns the definition of a plain name, it copies
           # those files and fails when there are none.
@@ -161,7 +161,7 @@ jobs:
           if gh release view "$tag" --repo "$REPO" > /dev/null 2>&1; then
             gh release delete "$tag" --repo "$REPO" --cleanup-tag --yes
           fi
-          notes="Test build of pull request #$PR at commit $SHA. Not part of the APT or RPM repositories. Install with scripts/install-pr-build.sh $PR. Deleted when the pull request closes."
+          notes="Test build of pull request #$PR at commit $SHA. Not part of the apt, RPM or pacman repositories. Install with scripts/install-pr-build.sh $PR. Deleted when the pull request closes."
           gh release create "$tag" upload/* --repo "$REPO" \
             --prerelease --latest=false --target "$DEFAULT_BRANCH" \
             --title "PR #$PR test build (${SHA:0:7})" --notes "$notes"
@@ -221,7 +221,7 @@ jobs:
           elif [ "$STATE" = "not-published" ]; then
             args+=(--state not-published --reason "$REASON")
           elif [ "$STATE" = "publish" ] && [ "$RELEASE_OUTCOME" = "success" ] && [ "$PUBLISHED" = "true" ]; then
-            args+=(--state published --debs-dir upload --rpms-dir upload)
+            args+=(--state published --debs-dir upload --rpms-dir upload --arch-dir upload)
           elif [ "$STATE" = "publish" ] && [ "$RELEASE_OUTCOME" = "success" ]; then
             args+=(--state not-published --reason "the pull request is closed or has a newer commit")
           else

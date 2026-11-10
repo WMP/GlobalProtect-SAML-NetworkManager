@@ -143,6 +143,8 @@ neon variant, output directories and `VERSION_SUFFIX` are in [BUILD.md](BUILD.md
 
 RPM packages (Fedora, EL 10, openSUSE; the same three packages, Plasma 6 only)
 are built with `rpm/build.sh <target> <amd64|arm64>`: see [RPM_REPO.md](RPM_REPO.md).
+Arch Linux packages (the same three, `x86_64` only, `arch/PKGBUILD`) are built with
+`arch/build.sh`: see [ARCH_REPO.md](ARCH_REPO.md).
 
 On Fedora and EL, the core RPM also installs the
 `network-manager-gpclient` SELinux policy module. The NetworkManager-launched
