@@ -1,9 +1,11 @@
 network-manager-gpclient (2.0.0) unstable; urgency=medium
 
   * RPM packages for Fedora 43, 44 and 45, RHEL/AlmaLinux/Rocky 10 and
-    openSUSE Leap 16.0 and Tumbleweed, for x86_64 and aarch64, in a signed
-    RPM repository next to the apt repository (dnf and zypper). The SELinux
-    module for Fedora and EL is included
+    openSUSE Leap 16.0, Leap 16.1 (closes #172) and Tumbleweed, for x86_64
+    and aarch64, in a signed RPM repository next to the apt repository (dnf
+    and zypper). The SELinux module for Fedora and EL is included
+  * Arch Linux packages for x86_64 in a signed pacman repository (closes
+    #173). Arch Linux ARM is not supported
   * Support for Ubuntu 24.10 was dropped (it is end of life): no new
     packages are built for it. Supported Ubuntu releases: 22.04, 24.04 and
     26.04, on amd64 and arm64. The packages already published for 24.10 stay
@@ -93,6 +95,10 @@ network-manager-gpclient (2.0.0) unstable; urgency=medium
     use vendored crates and need no network; a workflow checks that two
     builds give the same packages (closes #160). The openSUSE builds retry
     a zypper refresh that a stale mirror breaks
+  * Licenses: the packages ship third-party-licenses.txt with the license
+    texts of the Rust crates linked into gpclient and gpauth;
+    debian/copyright and the RPM and Arch Linux license fields name the
+    openconnect files with other licenses and the crates (closes #148)
 
  -- WMP <example@example.org>  Thu, 29 Oct 2026 00:09:04 +0000
 
