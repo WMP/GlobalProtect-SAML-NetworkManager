@@ -7,6 +7,7 @@ fedora44      registry.fedoraproject.org/fedora:44               .fc44   fedora
 fedora45      registry.fedoraproject.org/fedora:45               .fc45   fedora
 el10          quay.io/almalinuxorg/almalinux:10                  .el10   el
 leap16.0      registry.opensuse.org/opensuse/leap:16.0           .lp160  suse
+leap16.1      registry.opensuse.org/opensuse/leap:16.1           .lp161  suse
 tumbleweed    registry.opensuse.org/opensuse/tumbleweed:latest   .tw     suse
 #
 # Every target builds for amd64 (rpm x86_64) and arm64 (rpm aarch64).

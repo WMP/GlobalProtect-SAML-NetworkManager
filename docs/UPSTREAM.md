@@ -87,6 +87,10 @@ build error. This page explains how we find such a change and how we accept it.
    python3 -m pytest tests/upstream -q
    ```
 
+   Then run `bash scripts/vendor-crates.sh` and `python3 scripts/third_party_licenses.py -o /dev/null`.
+   It stops when a crate has no license file: `NOTICE_ALLOWLIST` names crates by
+   name and version, so a new version of an allowlisted crate is checked again.
+   Update the list after a person checked the crate.
 8. Open a pull request. If the gate says the change is breaking, do the
    manual verification below.
 

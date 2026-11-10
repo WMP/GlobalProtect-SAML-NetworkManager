@@ -10,6 +10,7 @@ Every release has RPM packages for these distributions, for `x86_64` and
 | `fedora45` | Fedora 45 | |
 | `el10` | RHEL 10, AlmaLinux 10, Rocky Linux 10 | needs EPEL and CRB (Plasma 6, `libnma-gtk4`) |
 | `leap16.0` | openSUSE Leap 16.0 | |
+| `leap16.1` | openSUSE Leap 16.1 | |
 | `tumbleweed` | openSUSE Tumbleweed | rolling: built against the Tumbleweed of the release day |
 
 `rpm/targets` is the list the build, the CI matrix and the repository use.
@@ -61,11 +62,12 @@ sudo dnf config-manager --add-repo https://wmp.github.io/GlobalProtect-SAML-Netw
 sudo dnf install network-manager-gpclient-gnome    # or network-manager-gpclient-plasma
 ```
 
-### openSUSE Leap 16.0 and Tumbleweed
+### openSUSE Leap 16.0, 16.1 and Tumbleweed
 
 ```bash
 sudo zypper addrepo https://wmp.github.io/GlobalProtect-SAML-NetworkManager/rpm/tumbleweed/network-manager-gpclient.repo
 # Leap 16.0: .../rpm/leap16.0/network-manager-gpclient.repo
+# Leap 16.1: .../rpm/leap16.1/network-manager-gpclient.repo
 sudo zypper refresh                                 # accept the key
 sudo zypper install network-manager-gpclient-gnome  # or network-manager-gpclient-plasma
 ```

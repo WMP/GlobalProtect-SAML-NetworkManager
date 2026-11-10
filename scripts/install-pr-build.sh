@@ -21,8 +21,8 @@
 #
 # The RPM packages of a pull request have the release <revision><dist>.pr<N>.<run>
 # (1.fc44.pr24.57 sorts after 1.fc44). Supported: Fedora 43, 44, 45, EL 10
-# (AlmaLinux, Rocky, RHEL, CentOS Stream; needs EPEL and CRB), openSUSE Leap 16.0
-# and Tumbleweed, on x86_64 and aarch64. EL 9 is not supported (no webkit2gtk-4.1).
+# (AlmaLinux, Rocky, RHEL, CentOS Stream; needs EPEL and CRB), openSUSE Leap 16.0,
+# 16.1 and Tumbleweed, on x86_64 and aarch64. EL 9 is not supported (no webkit2gtk-4.1).
 #
 # Before anything is installed, the files are checked with `gh attestation
 # verify` (build provenance of build-release.yml), when gh is installed,
@@ -142,12 +142,15 @@ case "$os_id" in
         esac ;;
     opensuse-leap)
         package_format=rpm
-        [ "$version_id" = "16.0" ] || die "openSUSE Leap ${version_id:-?} is not supported: the test packages are built for Leap 16.0"
-        rpm_target=leap16.0; rpm_dist=.lp160 ;;
+        case "$version_id" in
+            16.0) rpm_target=leap16.0; rpm_dist=.lp160 ;;
+            16.1) rpm_target=leap16.1; rpm_dist=.lp161 ;;
+            *) die "openSUSE Leap ${version_id:-?} is not supported: the test packages are built for Leap 16.0 and 16.1" ;;
+        esac ;;
     opensuse-tumbleweed)
         package_format=rpm
         rpm_target=tumbleweed; rpm_dist=.tw ;;
-    *) die "this is '$os_id', not Ubuntu or KDE neon, and not Fedora, EL 10 or openSUSE: the test packages are built for Ubuntu 22.04, 24.04 and 26.04 (and KDE neon, which is Ubuntu 24.04 with Plasma 6), Fedora 43 to 45, EL 10, openSUSE Leap 16.0 and Tumbleweed only" ;;
+    *) die "this is '$os_id', not Ubuntu or KDE neon, and not Fedora, EL 10 or openSUSE: the test packages are built for Ubuntu 22.04, 24.04 and 26.04 (and KDE neon, which is Ubuntu 24.04 with Plasma 6), Fedora 43 to 45, EL 10, openSUSE Leap 16.0, 16.1 and Tumbleweed only" ;;
 esac
 
 if [ "$package_format" = deb ]; then
@@ -365,7 +368,7 @@ missing packages, enable them first (if you have not yet):
 EOF
     fi
     case "$rpm_target" in
-        leap16.0|tumbleweed)
+        leap16.0|leap16.1|tumbleweed)
             # The test packages are not signed
             manager=(zypper)
             [ "$assume_yes" -eq 1 ] && manager+=(--non-interactive)

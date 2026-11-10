@@ -33,7 +33,7 @@ NAME_RE = re.compile(
     r"[.~](?P<codename>[a-z]+)1_(?P<arch>[a-z0-9]+)\.deb"
 )
 # <package>-<version>-<revision>.<dist>.<rpm arch>.rpm with the dist tags of rpm/targets:
-# fc<N> (Fedora), el<N>, lp<NN0> (openSUSE Leap) and tw (Tumbleweed)
+# fc<N> (Fedora), el<N>, lp<major><minor> (openSUSE Leap: lp161 is 16.1) and tw (Tumbleweed)
 RPM_NAME_RE = re.compile(
     r"(?P<package>network-manager-gpclient(?:-gnome|-plasma)?)-"
     r"(?P<version>[0-9][A-Za-z0-9.+~_]*)-[0-9]+\."

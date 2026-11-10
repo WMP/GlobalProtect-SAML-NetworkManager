@@ -56,11 +56,12 @@ RPM_OS = {
     "fedora45": 'ID=fedora\nVERSION_ID=45\n',
     "el10": 'ID="almalinux"\nID_LIKE="rhel centos fedora"\nVERSION_ID="10.0"\n',
     "leap16.0": 'ID="opensuse-leap"\nID_LIKE="suse opensuse"\nVERSION_ID="16.0"\n',
+    "leap16.1": 'ID="opensuse-leap"\nID_LIKE="suse opensuse"\nVERSION_ID="16.1"\n',
     "tumbleweed": 'ID="opensuse-tumbleweed"\nID_LIKE="opensuse suse"\nVERSION_ID="20261020"\n',
 }
 RPM_DIST = {"fedora43": ".fc43", "fedora44": ".fc44", "fedora45": ".fc45", "el10": ".el10",
-            "leap16.0": ".lp160", "tumbleweed": ".tw"}
-RPM_ZYPPER = ("leap16.0", "tumbleweed")
+            "leap16.0": ".lp160", "leap16.1": ".lp161", "tumbleweed": ".tw"}
+RPM_ZYPPER = ("leap16.0", "leap16.1", "tumbleweed")
 
 
 def rpm(suffix, target="fedora44", arch="x86_64", build="", version="1.4.2", revision="1"):
@@ -1239,6 +1240,8 @@ class TestRpmRejected:
             ('ID="rocky"\nVERSION_ID="8.10"\n', "not supported"),
             ('ID="rhel"\nVERSION_ID="11.0"\n', "EL 10 only"),
             ('ID="opensuse-leap"\nVERSION_ID="15.6"\n', "Leap 15.6 is not supported"),
+            ('ID="opensuse-leap"\nVERSION_ID="16.2"\n', "Leap 16.2 is not supported"),
+            ('ID="opensuse-leap"\nVERSION_ID="16.10"\n', "Leap 16.10 is not supported"),
             ('ID="opensuse-leap"\n', "Leap ? is not supported"),
             ('ID="sles"\nVERSION_ID="16.0"\n', "not Ubuntu or KDE neon"),
             ('ID="centos-stream"\nVERSION_ID="10"\n', "not Ubuntu or KDE neon"),
