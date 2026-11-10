@@ -176,9 +176,10 @@ def copyright_problems(text):
     problems += copyright_order_problems(stanzas)
     defined = {s["License"].split("\n")[0] for s in stanzas[1:] if "Files" not in s and "License" in s}
     for stanza in files:
-        name = stanza.get("License", "").split("\n")[0].strip()
-        if name and name not in defined:
-            problems.append(f"license without a paragraph: {name}")
+        # "A and B": a paragraph for each
+        for name in re.split(r"\s+(?:and|or)\s+", stanza.get("License", "").split("\n")[0].strip()):
+            if name and name not in defined:
+                problems.append(f"license without a paragraph: {name}")
     return problems
 
 
@@ -228,6 +229,7 @@ def test_copyright_has_gpl3_for_upstream_and_lgpl_for_the_openconnect_fork():
         ("Copyright: 2024 WMP\n", ""),
         ("\nLicense: GPL-3\n This program", "\nLicense: GPL-4\n This program"),
         ("License: MIT\n Permission", "License: X11\n Permission"),
+        ("\nLicense: BSD-2-Clause\n Redistribution", "\nLicense: BSD-two\n Redistribution"),  # "A and B" needs both
     ],
 )
 def test_broken_copyright_is_reported(old, new):

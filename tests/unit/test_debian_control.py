@@ -862,8 +862,9 @@ def run_rules(tmp_path, control_text, target, dry_run=False):
     (tmp_path / "external" / "GlobalProtect-openconnect").mkdir(parents=True, exist_ok=True)
     fakes = tmp_path / "fakes"
     fakes.mkdir(exist_ok=True)
-    for name in ("fakemake", "cmake", "cargo"):
-        (fakes / name).write_text('#!/bin/sh\necho "%s $*" >> "%s"\n' % (name, tmp_path / "log"))
+    (tmp_path / "scripts").mkdir(exist_ok=True)
+    for name in ("fakemake", "cmake", "cargo", "../scripts/third_party_licenses.py"):
+        (fakes / name).write_text('#!/bin/sh\necho "%s $*" >> "%s"\n' % (os.path.basename(name), tmp_path / "log"))
         (fakes / name).chmod(0o755)
     command = ["make", "-f", "debian/rules", target, "MAKE=%s" % (fakes / "fakemake")]
     result = subprocess.run(command + (["-n"] if dry_run else []), cwd=tmp_path, capture_output=True, text=True,
@@ -1051,7 +1052,8 @@ class TestRulesPlasmaOnly:
         log[1] = "fakemake gnome-plugins"
         assert log == ["fakemake init-submodules", "fakemake gnome-plugins",
                        "cmake .. -DQT_MAJOR_VERSION=%s" % QT[name][-1], "fakemake ", "fakemake mo",
-                       "cargo auditable build --locked --release --bin gpclient --bin gpauth"]
+                       "cargo auditable build --locked --release --bin gpclient --bin gpauth",
+                       "third_party_licenses.py -o third-party-licenses.txt"]
 
     def test_gpservice_is_neither_built_nor_installed(self, tmp_path):
         # nothing in this project starts gpservice: the callback path is gpclient launch-gui -> gpauth

@@ -35,6 +35,7 @@ Contents:
 - `/usr/lib/NetworkManager/VPN/nm-gpclient-service.name` - Service descriptor
 - `/usr/libexec/gpclient/edge-wrapper` - Browser wrapper script
 - `/usr/bin/gpclient`, `/usr/bin/gpauth` - VPN client binaries
+- `/usr/share/doc/network-manager-gpclient/third-party-licenses.txt` - licenses of the Rust crates (see "Licenses")
 - D-Bus and systemd configuration files
 
 The unit `config/nm-gpclient.service` (used for D-Bus activation) runs the
@@ -164,6 +165,27 @@ pull request). When a file lists a version, such as `debian/*.maintscript`, writ
 ```bash
 dpkg-buildpackage -us -uc -b
 ```
+
+## Licenses
+
+`debian/copyright` (DEP-5) names the license of each part of the source:
+this project, the upstream workspace crates, the bundled openconnect fork
+(including the files with another license than LGPL-2.1-only: `lzo.c`,
+`json/`, `jsondump.c`) and the vendored Rust crates (`vendor/`). The License
+tag of `rpm/network-manager-gpclient.spec` is the same set as SPDX IDs
+(`tests/unit/test_rpm_license.py` checks it).
+
+`scripts/third_party_licenses.py` writes `third-party-licenses.txt`: every
+Rust crate linked into `gpclient` and `gpauth` (Linux, normal dependencies,
+no upstream workspace crates) with its SPDX license expression, and the full
+text of its license and notice files. `debian/rules` and the spec run it after
+`cargo build` (offline) and install the file (`/usr/share/doc/...`, `%license`).
+It fails when a crate has no license expression, or no license file where the
+license needs a notice. A crate that is known to have no file in its package
+goes to `NOTICE_ALLOWLIST` in the script (a person checks each entry). After
+a change of `Cargo.lock` run `scripts/vendor-crates.sh`, then
+`scripts/third_party_licenses.py -o /tmp/x.txt`, and update `debian/copyright`
+(`vendor/*`) and the spec License tag when a new license ID appears.
 
 ## Installation
 
