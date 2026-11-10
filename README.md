@@ -122,7 +122,9 @@ RHEL 10 and its rebuilds, removal, and what differs from the Ubuntu packages:
 
 ### Arch Linux
 
-A pacman repository for Arch Linux, `x86_64` only. Trust the key once, then add the repository:
+A pacman repository for Arch Linux, `x86_64` only. Trust the key once, then add the repository.
+Before `pacman-key --lsign-key`, compare the key's fingerprint (`gpg --show-keys /tmp/gpclient.gpg`)
+with the one on the [landing page](https://wmp.github.io/GlobalProtect-SAML-NetworkManager/):
 
 ```bash
 curl -fsSLo /tmp/gpclient.gpg https://wmp.github.io/GlobalProtect-SAML-NetworkManager/arch/GPG-KEY-gpclient
@@ -138,8 +140,6 @@ EOF
 sudo pacman -Syu network-manager-gpclient-gnome     # or network-manager-gpclient-plasma (Plasma 6)
 ```
 
-Compare the key's fingerprint with the one on the
-[landing page](https://wmp.github.io/GlobalProtect-SAML-NetworkManager/) first.
 Removal, single files, and what differs from the Ubuntu packages:
 [docs/ARCH_REPO.md](docs/ARCH_REPO.md). Arch Linux ARM is not supported. The
 package contains the Python module `sdbus`; do not install it with pip. It
