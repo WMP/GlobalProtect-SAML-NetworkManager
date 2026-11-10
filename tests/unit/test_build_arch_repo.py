@@ -36,8 +36,11 @@ KEY = "0123456789ABCDEF0123456789ABCDEF01234567"
 CORE = "network-manager-gpclient"
 PACKAGES = (CORE, CORE + "-gnome", CORE + "-plasma")
 
-# Like repo-add: gpclient.db.tar.gz and gpclient.files.tar.gz with one entry per package name
-# (the newest version of it) and the symlinks gpclient.db and gpclient.files
+# The fake docker runs the script it is given on stdin, in the repository directory, with stubs
+# of the two tools of the archlinux image in front in PATH: vercmp (a small version compare) and
+# repo-add, which records its arguments and, like the real one, makes gpclient.db.tar.gz and
+# gpclient.files.tar.gz with one entry per package it is given, and the symlinks gpclient.db
+# and gpclient.files
 FAKE_DOCKER = r"""#!/bin/bash
 echo "docker $*" >> "$FAKE_DIR/calls"
 cat > "$FAKE_DIR/container_script"
@@ -50,26 +53,37 @@ for arg in "$@"; do
 done
 cd "$dir" || exit 1
 [ -z "$FAKE_NO_DB" ] || exit 0
-python3 - <<'PY'
-import glob, io, re, tarfile
+PATH="$FAKE_DIR/stubs:$PATH" REPO_NAME=gpclient bash "$FAKE_DIR/container_script"
+"""
 
-newest = {}
-for path in sorted(glob.glob("*.pkg.tar.zst")):
-    m = re.fullmatch(r"(.+)-([^-]+-[0-9]+)-x86_64\.pkg\.tar\.zst", path)
-    key = lambda v: [int(x) if x.isdigit() else x for x in re.split(r"[.-]", v)]
-    if m.group(1) not in newest or key(m.group(2)) > key(newest[m.group(1)][0]):
-        newest[m.group(1)] = (m.group(2), path)
-for archive in ("gpclient.db.tar.gz", "gpclient.files.tar.gz"):
+# vercmp A B: -1, 0 or 1 (enough for "1.9.0-1"-like versions: numbers and dots, then "-<pkgrel>")
+FAKE_VERCMP = r"""#!/usr/bin/env python3
+import re, sys
+
+def key(v):
+    return [int(x) if x.isdigit() else x for x in re.split(r"[.-]", v)]
+
+a, b = key(sys.argv[1]), key(sys.argv[2])
+print((a > b) - (a < b))
+"""
+
+FAKE_REPO_ADD = r"""#!/usr/bin/env python3
+import io, os, re, sys, tarfile
+
+args = [a for a in sys.argv[1:] if not a.startswith("--")]
+db, files = args[0], args[1:]
+with open(os.path.join(os.environ["FAKE_DIR"], "repo_add_args"), "w") as log:
+    log.write("\n".join(files) + "\n")
+for archive in (db, db.replace(".db.", ".files.")):
     with tarfile.open(archive, "w:gz") as tar:
-        for name, (version, path) in sorted(newest.items()):
-            desc = ("%%FILENAME%%\n%s\n\n%%NAME%%\n%s\n\n%%VERSION%%\n%s\n" % (path, name, version)).encode()
-            info = tarfile.TarInfo("%s-%s/desc" % (name, version))
+        for path in files:
+            m = re.fullmatch(r"(.+)-([^-]+-[0-9]+)-x86_64\.pkg\.tar\.zst", path)
+            desc = ("%%FILENAME%%\n%s\n\n%%NAME%%\n%s\n\n%%VERSION%%\n%s\n" % (path, m.group(1), m.group(2))).encode()
+            info = tarfile.TarInfo("%s-%s/desc" % (m.group(1), m.group(2)))
             info.size = len(desc)
             tar.addfile(info, io.BytesIO(desc))
-import os
 for link in ("gpclient.db", "gpclient.files"):
     os.symlink(link + ".tar.gz", link)
-PY
 """
 
 FAKE_GPG = r"""#!/bin/bash
@@ -104,6 +118,10 @@ class Box:
         for name, body in (("docker", FAKE_DOCKER), ("gpg", FAKE_GPG)):
             (self.bin / name).write_text(body)
             (self.bin / name).chmod(0o755)
+        (self.fake / "stubs").mkdir()
+        for name, body in (("vercmp", FAKE_VERCMP), ("repo-add", FAKE_REPO_ADD)):
+            (self.fake / "stubs" / name).write_text(body)
+            (self.fake / "stubs" / name).chmod(0o755)
         self.write_index()
 
     def write_index(self):
@@ -139,6 +157,10 @@ class Box:
         if key:
             command.append(key)
         return subprocess.run(command, env=env, capture_output=True, text=True, timeout=60)
+
+    def repo_add_args(self):
+        path = self.fake / "repo_add_args"
+        return sorted(path.read_text().split()) if path.exists() else None
 
     def calls(self):
         path = self.fake / "calls"
@@ -216,6 +238,34 @@ class TestLayout:
         files = {name for name in box.tree() if not name.endswith(".sig") and name.startswith("x86_64/")}
         sigs = {name[:-4] for name in box.tree() if name.endswith(".sig")}
         assert files == sigs
+
+
+class TestNewestVersionLoop:
+    """The loop of the script in the container, run for real with stubs of vercmp and repo-add"""
+
+    def test_repo_add_gets_exactly_the_newest_file_of_each_package(self, box):
+        box.add_set("1.4.0")
+        box.add_set("1.5.0")
+        box.add_set("1.4.5", "2")
+
+        assert box.run().returncode == 0
+        assert box.repo_add_args() == sorted(pkg_name(p, "1.5.0") for p in PACKAGES)
+
+    def test_an_older_file_that_sorts_last_is_not_added(self, box):
+        # "1.10.0" sorts before "1.9.0" in glob order, so the older one comes last
+        box.add_set("1.10.0")
+        box.add_set("1.9.0")
+
+        assert box.run().returncode == 0
+        assert box.repo_add_args() == sorted(pkg_name(p, "1.10.0") for p in PACKAGES)
+
+    def test_a_higher_pkgrel_wins_and_each_package_is_chosen_on_its_own(self, box):
+        box.add(pkg_name(CORE, "1.5.0", "1"), pkg_name(CORE, "1.5.0", "2"), pkg_name(CORE + "-gnome", "1.5.0"),
+                pkg_name(CORE + "-gnome", "1.6.0"), pkg_name(CORE + "-plasma", "1.5.0"))
+
+        assert box.run().returncode == 0
+        assert box.repo_add_args() == sorted([pkg_name(CORE, "1.5.0", "2"), pkg_name(CORE + "-gnome", "1.6.0"),
+                                              pkg_name(CORE + "-plasma", "1.5.0")])
 
 
 class TestTools:
