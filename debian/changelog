@@ -100,7 +100,7 @@ network-manager-gpclient (2.0.0) unstable; urgency=medium
     debian/copyright and the RPM and Arch Linux license fields name the
     openconnect files with other licenses and the crates (closes #148)
 
- -- WMP <example@example.org>  Thu, 29 Oct 2026 00:09:04 +0000
+ -- WMP <example@example.org>  Tue, 10 Nov 2026 11:50:29 +0000
 
 network-manager-gpclient (1.5.0-1) unstable; urgency=medium
 
