@@ -28,10 +28,14 @@ Summary:        NetworkManager VPN plugin for GlobalProtect
 # Per package, as debian/copyright says for the same files (checked by
 # tests/unit/test_rpm_license.py): the service and the editors are
 # LGPL-2.1-only; gpclient and gpauth are GPL-3.0-only (upstream Cargo.toml
-# "GPL-3.0") with MIT crates and the LGPL-2.1-only openconnect fork linked in;
+# "GPL-3.0") with the LGPL-2.1-only openconnect fork linked in (some of its
+# files are LGPL-2.1-or-later (lzo.c) and BSD-2-Clause (json/json.c, jsondump.c))
+# and the Rust crates (the union of their SPDX IDs; the list with the texts is
+# third-party-licenses.txt, from scripts/third_party_licenses.py);
 # nm-vpn-plugin-utils (in libnm-vpn-plugin-gpclient.so, this package) is
-# LGPL-2.0-or-later. RPM only: the bundled python-sdbus is LGPL-2.1-or-later.
-License:        GPL-3.0-only AND LGPL-2.1-only AND LGPL-2.0-or-later AND LGPL-2.1-or-later AND MIT
+# LGPL-2.0-or-later. RPM only: the bundled python-sdbus is LGPL-2.1-or-later
+# (also in openconnect, so debian/copyright has it too).
+License:        GPL-3.0-only AND LGPL-2.1-only AND LGPL-2.0-or-later AND LGPL-2.1-or-later AND BSD-2-Clause AND BSD-3-Clause AND MIT AND Apache-2.0 AND MPL-2.0 AND ISC AND Zlib AND Unicode-3.0 AND Unlicense AND CC0-1.0 AND BSL-1.0 AND MIT-0 AND 0BSD
 URL:            https://github.com/WMP/GlobalProtect-SAML-NetworkManager
 Source0:        %{name}-%{version}.tar.gz
 Source1:        sdbus-%{sdbus_version}.tar.gz
@@ -184,6 +188,10 @@ fi
 (cd external/GlobalProtect-openconnect && \
   env -u RUSTFLAGS cargo auditable build --locked $vendor_flags --release --bin gpclient --bin gpauth)
 
+# The licenses of the Rust crates linked into gpclient and gpauth (offline; the build
+# stops when a crate has no license)
+/usr/bin/python3 scripts/third_party_licenses.py -o third-party-licenses.txt
+
 %install
 # The translations (po/LINGUAS): each domain goes to its own package
 make install-mo MO_DOMAIN=NetworkManager-gpclient DESTDIR=%{buildroot}
@@ -317,6 +325,7 @@ fi
 %files -f NetworkManager-gpclient.lang
 %license LICENSE
 %license LICENSE.GPL-3.0
+%license third-party-licenses.txt
 %license sdbus-%{sdbus_version}/COPYING.LESSER
 %doc README.md
 %{_bindir}/gpclient

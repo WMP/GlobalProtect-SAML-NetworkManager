@@ -86,6 +86,10 @@ ifneq ($(HAS_CORE),)
 	# Only local crates (gpauth, gpclient, gpapi, common, openconnect) will be recompiled
 	@echo "Building gpclient and gpauth (reusing cached dependencies)..."
 	cd external/GlobalProtect-openconnect && cargo auditable build --locked $(CARGO_VENDOR_FLAGS) --release --bin gpclient --bin gpauth
+
+	# The licenses of the Rust crates linked into gpclient and gpauth (offline, from
+	# vendor/ when it exists); the build stops when a crate has no license
+	scripts/third_party_licenses.py -o third-party-licenses.txt
 endif
 
 # Run the QtTest of the Plasma settings widget (plugins/plasma/tests) in the
@@ -184,6 +188,8 @@ ifneq ($(HAS_CORE),)
 		$(CURDIR)/debian/network-manager-gpclient/usr/bin/gpclient
 	install -D -m 755 external/GlobalProtect-openconnect/target/release/gpauth \
 		$(CURDIR)/debian/network-manager-gpclient/usr/bin/gpauth
+	install -D -m 644 third-party-licenses.txt \
+		$(CURDIR)/debian/network-manager-gpclient/usr/share/doc/network-manager-gpclient/third-party-licenses.txt
 
 	# Install .desktop file for URL handler registration (globalprotectcallback://)
 	install -D -m 644 external/GlobalProtect-openconnect/packaging/files/usr/share/applications/gpgui.desktop \
@@ -216,7 +222,7 @@ override_dh_installsystemd:
 
 override_dh_auto_clean:
 	$(MAKE) clean || true
-	rm -rf plugins/plasma/build debs
+	rm -rf plugins/plasma/build debs third-party-licenses.txt
 
 override_dh_gencontrol:
 	@echo ======================================================= override_dh_gencontrol:
