@@ -55,23 +55,157 @@ def test_pkgbuild_is_x86_64_only_without_a_debug_package():
     assert "options=(!debug !lto)\n" in text
 
 
-def test_pkgbuild_takes_the_version_from_the_build_script():
+def test_pkgbuild_takes_the_version_from_the_build_script_in_ci_mode():
     text = read("arch/PKGBUILD")
     assert "pkgver=${PROJECT_VERSION}${PR_SUFFIX:-}\n" in text
     assert "pkgrel=$DEBIAN_RELEASE\n" in text
-    assert not re.search(r"^pkgver=\d", text, re.M) and not re.search(r"^pkgrel=\d", text, re.M)
     # the source archive is named after the version without the pull request marker
-    assert '"$pkgbase-$PROJECT_VERSION.tar.gz"' in text
-    # and stops when it is not run by arch/build.sh
-    assert ': "${PROJECT_VERSION:?' in text and '"${SDBUS_SHA256:?}"' in text
+    assert '_dir=network-manager-gpclient-$PROJECT_VERSION\n' in text and '"$_dir.tar.gz"' in text
+    # and stops when the pieces of the CI mode are not all there
+    assert ': "${DEBIAN_RELEASE:?' in text and '"${SDBUS_SHA256:?}"' in text
 
 
 def test_pkgbuild_bundles_python_sdbus_checked_against_the_pinned_sha256():
     text = read("arch/PKGBUILD")
-    assert '"sdbus-$SDBUS_VERSION.tar.gz"' in text
-    assert 'sha256sums=(SKIP "$SDBUS_SHA256")' in text
+    assert '"sdbus-$_sdbus_version.tar.gz"' in text
+    assert 'sha256sums=(SKIP "$_sdbus_sha256")' in text  # CI mode
+    assert 'sha256sums=(SKIP SKIP SKIP SKIP "$_sdbus_sha256")' in text  # user mode
     assert "python-sdbus" not in re.search(r"^makedepends=\(.*?^\)", text, re.M | re.S).group(0)
     assert "--no-index" in text
+
+
+# --- user mode: the values written in the PKGBUILD do not drift from the rest of the repository ---
+
+
+def pkgbuild_value(text, name):
+    """The value of `name=value` in the user mode branch (after `else`) of the PKGBUILD"""
+    user = text.split("\nelse\n", 1)[1]
+    match = re.search(r"^  %s=(\S+)$" % re.escape(name), user, re.M)
+    assert match, name
+    return match.group(1)
+
+
+def user_mode_sources(text):
+    return re.findall(r'^    "(\S+?)::git\+(\S+?)\.git#(tag|commit)=(\S+?)"$', text.split("\nelse\n", 1)[1], re.M)
+
+
+def changelog_upstream_version(text):
+    return re.match(r"^\S+ \(([^)]+)\) ", text).group(1).rsplit("-", 1)[0]
+
+
+def rpm_source(name, text=None):
+    return re.search(r"^%s=(\S+)$" % name, text or read("rpm/sources"), re.M).group(1)
+
+
+def all_gitmodules():
+    """.gitmodules of the project and of the submodule (which has the two nested ones)"""
+    inner = os.path.join(ROOT, "external", "GlobalProtect-openconnect", ".gitmodules")
+    if not os.path.isfile(inner):
+        pytest.skip("the submodules are not checked out")
+    with open(inner, encoding="utf-8") as handle:
+        return read(".gitmodules") + "\n" + handle.read()
+
+
+def gitlink(repo, path):
+    out = subprocess.run(["git", "ls-tree", "HEAD", path], cwd=repo, capture_output=True, text=True, check=True).stdout
+    return out.split()[2]
+
+
+def gitmodules_urls(text):
+    return dict(re.findall(r'\[submodule "([^"]+)"\]\n\s*path = \S+\n\s*url = (\S+)', text))
+
+
+def user_mode_problems(pkgbuild, changelog, sources, gitmodules, links):
+    """What in the user mode of `pkgbuild` differs from the changelog, rpm/sources, .gitmodules and
+    the gitlinks (`links`: {path: commit})"""
+    problems = []
+    if pkgbuild_value(pkgbuild, "pkgver") != changelog_upstream_version(changelog):
+        problems.append("pkgver differs from debian/changelog")
+    if pkgbuild_value(pkgbuild, "_sdbus_version") != rpm_source("SDBUS_VERSION", sources):
+        problems.append("the sdbus version differs from rpm/sources")
+    if pkgbuild_value(pkgbuild, "_sdbus_sha256") != rpm_source("SDBUS_SHA256", sources):
+        problems.append("the sdbus sha256 differs from rpm/sources")
+    urls = gitmodules_urls(gitmodules)
+    expected = {  # source name -> (url of .gitmodules, path of the gitlink)
+        "GlobalProtect-openconnect": ("external/GlobalProtect-openconnect", "external/GlobalProtect-openconnect"),
+        "openconnect": ("crates/openconnect/deps/openconnect", "crates/openconnect/deps/openconnect"),
+        "libxml2": ("crates/openconnect/deps/libxml2", "crates/openconnect/deps/libxml2"),
+    }
+    found = {name: (url, kind, ref) for name, url, kind, ref in user_mode_sources(pkgbuild)}
+    if set(found) != {"network-manager-gpclient", *expected}:
+        problems.append("the git sources are not the project and its three submodules")
+    for name, (module, path) in expected.items():
+        if name not in found:
+            continue
+        url, kind, ref = found[name]
+        if kind != "commit" or ref != links.get(path):
+            problems.append(f"{name} is not pinned to the commit of the submodule")
+        if url + ".git" != urls.get(module):
+            problems.append(f"the URL of {name} differs from .gitmodules")
+    project = found.get("network-manager-gpclient")
+    if not project or project[1:] != ("tag", "v$pkgver"):
+        problems.append("the project is not taken from the tag v$pkgver")
+    return problems
+
+
+def real_links():
+    sub = os.path.join(ROOT, "external", "GlobalProtect-openconnect")
+    if not os.path.isdir(os.path.join(sub, ".git")) and not os.path.isfile(os.path.join(sub, ".git")):
+        pytest.skip("the submodules are not checked out")
+    top = "external/GlobalProtect-openconnect"
+    return {
+        top: gitlink(ROOT, top),
+        "crates/openconnect/deps/openconnect": gitlink(sub, "crates/openconnect/deps/openconnect"),
+        "crates/openconnect/deps/libxml2": gitlink(sub, "crates/openconnect/deps/libxml2"),
+    }
+
+
+def gitlink_in_the_tree():
+    """The gitlink of the top submodule in the index even without a checkout (a copy without .git)"""
+    return subprocess.run(["git", "ls-tree", "HEAD", "external/GlobalProtect-openconnect"], cwd=ROOT,
+                          capture_output=True, text=True).returncode == 0
+
+
+def test_user_mode_values_equal_the_changelog_rpm_sources_gitmodules_and_gitlinks():
+    if not gitlink_in_the_tree():
+        pytest.skip("not a git checkout")
+    problems = user_mode_problems(read("arch/PKGBUILD"), read("debian/changelog"), read("rpm/sources"),
+                                  all_gitmodules(), real_links())
+    assert problems == []
+
+
+@pytest.mark.parametrize("old, new, expected", [
+    ("pkgver=2.0.0", "pkgver=1.9.9", "pkgver"),
+    ("_sdbus_version=0.14.3", "_sdbus_version=0.14.2", "sdbus version"),
+    ("_sdbus_sha256=4ec4", "_sdbus_sha256=0000", "sdbus sha256"),
+    ("#commit=915c130c", "#commit=015c130c", "GlobalProtect-openconnect is not pinned"),
+    ("#commit=33b3d7a0", "#commit=03b3d7a0", "openconnect is not pinned"),
+    ("#commit=f8a8c1f5", "#commit=08a8c1f5", "libxml2 is not pinned"),
+    ("github.com/yuezk/openconnect.git", "github.com/yuezk/openconnect2.git", "URL of openconnect"),
+    ("github.com/GNOME/libxml2.git", "github.com/GNOME/libxml3.git", "URL of libxml2"),
+    ("#tag=v$pkgver", "#commit=abc", "tag"),
+])
+def test_user_mode_drift_is_found(old, new, expected):
+    pkgbuild = read("arch/PKGBUILD")
+    assert old in pkgbuild
+    links = {"external/GlobalProtect-openconnect": "915c130c708582a61bbd5ccf747f94347d732364",
+             "crates/openconnect/deps/openconnect": "33b3d7a01d2fdcbc68652d63d69387ed599c244b",
+             "crates/openconnect/deps/libxml2": "f8a8c1f59db355b46962577e7b74f1a1e8149dc6"}
+    gitmodules = all_gitmodules()
+    # with the right values the check is clean ...
+    assert user_mode_problems(pkgbuild, read("debian/changelog"), read("rpm/sources"), gitmodules, links) == []
+    # ... and it finds the change
+    problems = user_mode_problems(pkgbuild.replace(old, new, 1), read("debian/changelog"), read("rpm/sources"),
+                                  gitmodules, links)
+    assert any(expected in problem for problem in problems), problems
+
+
+def test_user_mode_needs_no_environment_and_ci_mode_ignores_nothing():
+    text = read("arch/PKGBUILD")
+    user = text.split("\nelse\n", 1)[1].split("\nfi\n", 1)[0]
+    assert "$PROJECT_VERSION" not in user and "SDBUS" not in user.replace("_sdbus", "")
+    # cargo fetch in prepare() and an offline build
+    assert "cargo fetch --locked" in text and "vendor_flags=(--offline)" in text
 
 
 def test_pkgbuild_core_package_conflicts_with_the_aur_packages_of_upstream():

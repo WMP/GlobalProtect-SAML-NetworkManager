@@ -23,7 +23,7 @@ GitHub Pages.
 | `plugins/gnome/`, `plugins/plasma/` | Connection editor plugins (GTK3/GTK4, Plasma 5/6) |
 | `debian/` | Packaging; `debian/control.ubuntu<version>` is copied to `debian/control` per build |
 | `rpm/` | RPM packaging: `targets`, the spec, `build.sh` (build in a container), `install-test.sh` |
-| `arch/` | Arch Linux packaging: `PKGBUILD` (same three packages, same files), `build.sh` (build in a container), `install-test.sh` |
+| `arch/` | Arch Linux packaging: `PKGBUILD` (same three packages, same files; plain `makepkg -si` in `arch/` builds a tag), `build.sh` (build in a container), `install-test.sh` |
 | `.github/workflows/` | `tests.yml` (unit tests), `build-release.yml` (Ubuntu × arch, RPM target × arch, Arch Linux; attests the packages and `SHA256SUMS`, uploads `SHA256SUMS`), `publish-apt.yml` (apt + RPM + pacman repositories; verifies the attested `SHA256SUMS` of every release and every package against it first, `.github/scripts/verify-release-assets.sh`), `codeql.yml`, `zizmor.yml`, `scorecard.yml` |
 | `.github/scripts/build-apt-repo.sh`, `build-rpm-repo.sh`, `build-arch-repo.sh` | Build the apt, RPM and pacman repositories from release assets |
 | `external/GlobalProtect-openconnect` | Git submodule (upstream `gpclient`/`gpauth`) |

@@ -281,6 +281,7 @@ SHELL_SCRIPTS := \
 	arch/container-build.sh \
 	arch/install-test.sh \
 	arch/network-manager-gpclient.install \
+	arch/standalone-test.sh \
 	build-all.sh \
 	config/90-gpclient-routing \
 	config/gpclient-nm-notify \

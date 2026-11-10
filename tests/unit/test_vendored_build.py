@@ -315,7 +315,7 @@ def test_a_dh_clean_without_the_exclusion_is_found(old, new):
 def pkgbuild_problems(text):
     """What is wrong with the conditional offline flags of arch/PKGBUILD"""
     problems = []
-    if not re.search(r'if \[ -f "\$PWD/vendor/config\.toml" \]; then\n\s*vendor_flags=\(--offline --config "\$PWD/vendor/config\.toml"\)\n\s*fi', text):
+    if not re.search(r'if \[ -f "\$PWD/vendor/config\.toml" \]; then\n\s*vendor_flags=\(--offline --config "\$PWD/vendor/config\.toml"\)\n(?:\s*elif [^\n]*\n[^\n]*\n)?\s*fi', text):
         problems.append("vendor_flags is not set only when vendor/config.toml exists")
     build = [l for l in text.splitlines() if "cargo auditable build" in l]
     if len(build) != 1 or '--locked "${vendor_flags[@]}"' not in build[0]:

@@ -125,7 +125,7 @@ def test_sbom_step_uses_the_lock_file_and_its_file_is_uploaded():
 def test_sbom_is_not_in_sha256sums():
     # SHA256SUMS lists the packages only: publish-apt checks every package against it
     script = "\n".join(step_lines(RELEASE, "Write SHA256SUMS"))
-    assert "sha256sum -- *.deb *.rpm *.pkg.tar.zst > SHA256SUMS" in script
+    assert "sha256sum -- *.deb *.rpm *.pkg.tar.zst PKGBUILD network-manager-gpclient.install > SHA256SUMS" in script
     assert "sbom" not in script
 
 

@@ -140,6 +140,10 @@ EOF
 sudo pacman -Syu network-manager-gpclient-gnome     # or network-manager-gpclient-plasma (Plasma 6)
 ```
 
+To build from source instead: `git clone --branch v2.0.0 https://github.com/WMP/GlobalProtect-SAML-NetworkManager`,
+`cd GlobalProtect-SAML-NetworkManager/arch && makepkg -si` (needs the network: GitHub, crates.io, PyPI;
+the repository above is the signed, prebuilt alternative).
+
 Removal, single files, and what differs from the Ubuntu packages:
 [docs/ARCH_REPO.md](docs/ARCH_REPO.md). Arch Linux ARM is not supported. The
 package contains the Python module `sdbus`; do not install it with pip. It

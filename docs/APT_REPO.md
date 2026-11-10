@@ -108,7 +108,9 @@ checks the build provenance of the test packages of a pull request with
 
 1. Add an entry to `debian/changelog` with the new version, native from 2.0.0 on
    (`network-manager-gpclient (2.0.0) unstable; urgency=medium`, no `-1`; see
-   [PACKAGING.md](PACKAGING.md#version-in-debianchangelog)).
+   [PACKAGING.md](PACKAGING.md#version-in-debianchangelog)). Set the same version as
+   `pkgver` of the user mode of `arch/PKGBUILD` (`python3 -m pytest tests/upstream -q`
+   checks it, and the commits of the submodules there).
 2. Commit, then tag and push. The tag is `v` and the version of the top changelog
    entry (`2.0.0` gives `v2.0.0`); `build-release.yml` stops at once when they
    differ, or when a version from 2.0.0 on has a Debian revision (`2.0.0-1`):

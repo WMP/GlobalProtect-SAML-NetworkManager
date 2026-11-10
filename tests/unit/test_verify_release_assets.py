@@ -236,3 +236,36 @@ def test_the_publish_workflow_verifies_every_release_before_the_repositories_are
     download = "\n".join(workflow_steps.step_lines("publish-apt.yml", "Download packages from every published release"))
     assert 'bash .github/scripts/verify-release-assets.sh "$tag"' in download
     assert names.index("Download packages from every published release") < names.index("Build the repository")
+
+
+def test_the_standalone_pkgbuild_assets_are_listed_in_sha256sums_and_ignored(box):
+    box.add(DEB)
+    box.add(PKG)
+    box.add("PKGBUILD")
+    box.add("network-manager-gpclient.install")
+
+    result = box.run()
+
+    assert result.returncode == 0, result.stderr
+    assert "verified PKGBUILD" not in result.stdout
+
+
+def test_the_standalone_pkgbuild_assets_do_not_hide_a_bad_package(box):
+    box.add("PKGBUILD")
+    box.add(PKG)
+    (box.dir / PKG).write_bytes(b"tampered")
+
+    result = box.run()
+
+    assert result.returncode != 0
+    assert f"SHA256 of {PKG}" in result.stderr
+
+
+def test_a_release_with_only_the_standalone_pkgbuild_assets_has_no_packages(box):
+    box.add("PKGBUILD")
+    box.add("network-manager-gpclient.install")
+
+    result = box.run()
+
+    assert result.returncode != 0
+    assert "no .deb, .rpm or .pkg.tar.zst" in result.stderr
