@@ -67,9 +67,14 @@ for path in \
     /usr/lib/qt6/plugins/plasma/network/vpn/plasmanetworkmanagement_gpclientui.json \
     /usr/share/licenses/network-manager-gpclient/LICENSE \
     /usr/share/licenses/network-manager-gpclient/LICENSE.GPL-3.0 \
-    /usr/share/licenses/network-manager-gpclient/COPYING.LESSER.python-sdbus; do
+    /usr/share/licenses/network-manager-gpclient/COPYING.LESSER.python-sdbus \
+    /usr/share/licenses/network-manager-gpclient/third-party-licenses.txt; do
     [ -e "$path" ] || fail "missing file $path"
 done
+
+# The licenses of the Rust crates are listed
+[ -s /usr/share/licenses/network-manager-gpclient/third-party-licenses.txt ] \
+    || fail "third-party-licenses.txt is empty"
 
 # Each translation domain is in its own package
 pacman -Qlq network-manager-gpclient | grep -qx /usr/share/locale/pl/LC_MESSAGES/NetworkManager-gpclient.mo \

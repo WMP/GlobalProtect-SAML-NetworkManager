@@ -25,10 +25,13 @@ pkgrel=$DEBIAN_RELEASE
 arch=(x86_64)
 url=https://github.com/WMP/GlobalProtect-SAML-NetworkManager
 # Per package, as debian/copyright says for the same files: the service and the
-# editors are LGPL-2.1-only; gpclient and gpauth are GPL-3.0-only with MIT crates and
-# the LGPL-2.1-only openconnect fork linked in; nm-vpn-plugin-utils is LGPL-2.0-or-later;
-# the bundled python-sdbus is LGPL-2.1-or-later.
-license=(GPL-3.0-only LGPL-2.1-only LGPL-2.0-or-later LGPL-2.1-or-later MIT)
+# editors are LGPL-2.1-only; gpclient and gpauth are GPL-3.0-only with the Rust crates
+# (the other ids; third-party-licenses.txt lists them) and the LGPL-2.1-only openconnect
+# fork linked in; nm-vpn-plugin-utils is LGPL-2.0-or-later; the bundled python-sdbus is
+# LGPL-2.1-or-later. The same set as the License: tag of rpm/network-manager-gpclient.spec
+# (tests/unit/test_rpm_license.py).
+license=(GPL-3.0-only LGPL-2.1-only LGPL-2.0-or-later LGPL-2.1-or-later BSD-2-Clause BSD-3-Clause
+  MIT Apache-2.0 MPL-2.0 ISC Zlib Unicode-3.0 Unlicense CC0-1.0 BSL-1.0 MIT-0 0BSD)
 # gpclient and gpauth are already stripped by upstream's release profile; no debug package
 options=(!debug !lto)
 makedepends=(
@@ -79,6 +82,10 @@ build() {
   fi
   (cd external/GlobalProtect-openconnect &&
     env -u RUSTFLAGS cargo auditable build --locked "${vendor_flags[@]}" --release --bin gpclient --bin gpauth)
+
+  # The licenses of the Rust crates linked into gpclient and gpauth (offline; the build
+  # stops when a crate has no license)
+  python scripts/third_party_licenses.py -o third-party-licenses.txt
 }
 
 check() {
@@ -157,6 +164,7 @@ package_network-manager-gpclient() {
   install -D -m 0644 LICENSE.GPL-3.0 "$pkgdir/usr/share/licenses/$pkgname/LICENSE.GPL-3.0"
   install -D -m 0644 "$srcdir/sdbus-$SDBUS_VERSION/COPYING.LESSER" \
     "$pkgdir/usr/share/licenses/$pkgname/COPYING.LESSER.python-sdbus"
+  install -D -m 0644 third-party-licenses.txt "$pkgdir/usr/share/licenses/$pkgname/third-party-licenses.txt"
   install -D -m 0644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
 }
 
