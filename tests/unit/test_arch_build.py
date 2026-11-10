@@ -125,6 +125,28 @@ def test_pkgbuild_pin_gives_a_valid_range():
         assert out == upper
 
 
+def spec_config_files():
+    return sorted(re.findall(r"^%config\(noreplace\) (\S+)$", read("rpm/network-manager-gpclient.spec"), re.M))
+
+
+def test_pkgbuild_backs_up_the_config_files_of_the_spec():
+    text = read("arch/PKGBUILD")
+    backup = re.search(r"^  backup=\((.*?)\)$", pkgbuild_function("package_network-manager-gpclient"), re.M | re.S)
+    assert backup
+    spec = [path.replace("%{_sysconfdir}", "etc") for path in spec_config_files()]
+    assert len(spec) == 4
+    assert sorted(backup.group(1).split()) == sorted(spec)
+    assert "backup=" not in pkgbuild_function("package_network-manager-gpclient-gnome") and text
+
+
+def test_pkgbuild_with_another_backup_list_is_found():
+    spec = [path.replace("%{_sysconfdir}", "etc") for path in spec_config_files()]
+    body = pkgbuild_function("package_network-manager-gpclient")
+    changed = body.replace(" etc/vpnc/reconnect.d/90-gpclient-notify", "", 1)
+    backup = re.search(r"^  backup=\((.*?)\)$", changed, re.M | re.S).group(1).split()
+    assert sorted(backup) != sorted(spec)
+
+
 def test_pkgbuild_builds_what_the_spec_builds():
     text = read("arch/PKGBUILD")
     spec = read("rpm/network-manager-gpclient.spec")

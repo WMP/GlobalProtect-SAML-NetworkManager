@@ -108,6 +108,9 @@ package_network-manager-gpclient() {
   # The same files as globalprotect-openconnect and its AUR variant
   conflicts=(globalprotect-openconnect globalprotect-openconnect-git)
   install=network-manager-gpclient.install
+  # The hooks in /etc/vpnc: %config(noreplace) of the spec
+  backup=(etc/vpnc/connect.d/90-gpclient-routing etc/vpnc/disconnect.d/90-gpclient-routing
+    etc/vpnc/post-connect.d/90-gpclient-notify etc/vpnc/reconnect.d/90-gpclient-notify)
   cd "$pkgbase-$PROJECT_VERSION"
 
   # The translations (po/LINGUAS): each domain goes to its own package
