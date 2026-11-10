@@ -91,6 +91,40 @@ def test_pkgbuild_depends_on_what_the_binaries_link():
     assert "libnma-gtk4" in pkgbuild_function("package_network-manager-gpclient-gnome")
 
 
+def python_pin_problems(body):
+    """What is wrong with the Python pin in the core package function"""
+    problems = []
+    if "sys.version_info[:2]" not in body:
+        problems.append("the minor version is not taken from the Python that built the package")
+    if 'depends+=("python>=$pyver" "python<${pyver%.*}.$((${pyver#*.} + 1))")' not in body:
+        problems.append("python is not pinned to the minor version")
+    return problems
+
+
+def test_pkgbuild_pins_the_python_minor_version_of_the_bundled_sdbus():
+    assert python_pin_problems(pkgbuild_function("package_network-manager-gpclient")) == []
+
+
+@pytest.mark.parametrize("old, new", [
+    ('depends+=("python>=$pyver" "python<${pyver%.*}.$((${pyver#*.} + 1))")', ""),  # plain python only
+    ('"python<${pyver%.*}.$((${pyver#*.} + 1))"', ""),  # no upper bound
+    ('"python>=$pyver" ', ""),  # no lower bound
+    ("sys.version_info[:2]", "sys.version_info[:1]"),
+])
+def test_pkgbuild_with_an_unpinned_python_is_found(old, new):
+    body = pkgbuild_function("package_network-manager-gpclient")
+    assert old in body
+    assert python_pin_problems(body.replace(old, new, 1)) != []
+
+
+def test_pkgbuild_pin_gives_a_valid_range():
+    # the shell arithmetic of the pin, run for a few versions: 3.14 -> python>=3.14 python<3.15
+    for pyver, upper in (("3.14", "3.15"), ("3.9", "3.10"), ("3.19", "3.20")):
+        out = subprocess.run(["bash", "-c", 'pyver=%s; echo "${pyver%%.*}.$((${pyver#*.} + 1))"' % pyver],
+                             capture_output=True, text=True, check=True).stdout.strip()
+        assert out == upper
+
+
 def test_pkgbuild_builds_what_the_spec_builds():
     text = read("arch/PKGBUILD")
     spec = read("rpm/network-manager-gpclient.spec")

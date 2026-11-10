@@ -121,6 +121,10 @@ checks the build provenance of the test packages of a pull request with
    attest each file), and then calls `publish-apt.yml`,
    which republishes the repository.
 
+The Arch Linux packages depend on the Python minor version they were built with (the
+bundled `sdbus` extension): after Arch moves to a new Python, cut a new release, or
+Arch users get a pacman dependency conflict (see [ARCH_REPO.md](ARCH_REPO.md)).
+
 The build appends the release codename to the version, so the same upstream
 version never means different binaries:
 `network-manager-gpclient_2.0.0~noble1_amd64.deb`.

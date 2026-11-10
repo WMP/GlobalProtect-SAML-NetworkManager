@@ -100,6 +100,11 @@ package_network-manager-gpclient() {
   depends=(networkmanager openconnect python systemd-libs vpnc xdg-utils
     webkit2gtk-4.1 gtk3 libsoup3 glib2 dbus gdk-pixbuf2 cairo libxml2 gnutls p11-kit nettle gmp lz4 zlib
     openssl gcc-libs glibc)
+  # The bundled sdbus extension lives in /usr/lib/python3.X/site-packages: pin the minor version of
+  # the Python that built it, so that pacman reports a conflict after a Python bump, not an ImportError
+  local pyver
+  pyver=$(python -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+  depends+=("python>=$pyver" "python<${pyver%.*}.$((${pyver#*.} + 1))")
   # The same files as globalprotect-openconnect and its AUR variant
   conflicts=(globalprotect-openconnect globalprotect-openconnect-git)
   install=network-manager-gpclient.install

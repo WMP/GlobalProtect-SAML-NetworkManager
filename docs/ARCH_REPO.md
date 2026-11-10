@@ -103,6 +103,12 @@ release, `sudo pacman -Syyuu` (downgrades to the repository's version).
 - The Plasma plugin links plasma-nm's private libraries. Arch is rolling: after a
   Plasma update it can fail to load until the next release of the plugin is built
   against the new Plasma.
+- `network-manager-gpclient` depends on the exact minor version of Python that
+  built it (`python>=3.14 python<3.15`), because the bundled `sdbus` is a C extension in
+  `/usr/lib/python3.X/site-packages`. After a Python update on Arch, pacman reports a
+  dependency conflict until the next release of the packages is built with the new
+  Python. Wait for it, or remove the packages; do not force the update past the
+  conflict, the service would fail with an `ImportError`.
 - `gpclient` and `gpauth` link the libraries of the system (`webkit2gtk-4.1`,
   `gnutls`, `libxml2`, ...), so after a soname change of one of them
   (`error while loading shared libraries`) wait for the next release or build the
