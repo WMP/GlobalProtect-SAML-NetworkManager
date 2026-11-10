@@ -1,0 +1,38 @@
+# shellcheck shell=sh
+# Install hooks of network-manager-gpclient; they mirror %post and %postun of the RPM
+# spec. pacman reloads systemd (daemon-reload) itself, and Arch has no SELinux policy
+# of this package and no nsswitch.conf change.
+
+reload_dbus() {
+    # Reload the D-Bus configuration to pick up the service files
+    if [ -x /usr/bin/dbus-send ]; then
+        dbus-send --system --type=method_call --dest=org.freedesktop.DBus \
+            /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig >/dev/null 2>&1 || :
+    fi
+}
+
+post_install() {
+    reload_dbus
+    # Stop a running (old) service, so that NetworkManager starts the new one
+    # (it runs as "python3[.X] /usr/lib/NetworkManager/nm-gpclient-service"; its
+    # process name is cut to 15 characters, so match the whole command line)
+    if [ -x /usr/bin/pkill ]; then
+        pkill -f '^(/usr/bin/)?python3[.0-9]* /usr/lib/NetworkManager/nm-gpclient-service' >/dev/null 2>&1 || :
+        pkill -f '^(/usr/bin/)?python3[.0-9]* /usr/libexec/NetworkManager/gpclient-nm-service' >/dev/null 2>&1 || :
+    fi
+}
+
+post_upgrade() {
+    post_install
+}
+
+pre_remove() {
+    # Stop the service (%systemd_preun of the RPM spec); the unit has no [Install] section
+    if [ -d /run/systemd/system ]; then
+        systemctl stop nm-gpclient.service >/dev/null 2>&1 || :
+    fi
+}
+
+post_remove() {
+    reload_dbus
+}
