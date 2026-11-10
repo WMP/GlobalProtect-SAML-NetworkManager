@@ -57,6 +57,26 @@ valid signature of a key you trust. Do not weaken it. `-Syu` is a full upgrade
 with the install: on Arch Linux do not refresh the databases (`-Sy`) without
 upgrading.
 
+### Build from source with makepkg
+
+The pacman repository above is the signed, prebuilt way. To build the packages yourself, as
+with any package of the Arch ecosystem, clone the tag and run `makepkg` in `arch/`:
+
+```bash
+git clone --branch v2.0.0 https://github.com/WMP/GlobalProtect-SAML-NetworkManager
+cd GlobalProtect-SAML-NetworkManager/arch
+makepkg -si                  # builds the three packages and installs them (asks for the dependencies)
+```
+
+`arch/PKGBUILD` is the same file the CI uses; without the environment variables of
+`arch/build.sh` it is in user mode. That mode needs the network: it fetches the project
+and its three submodules from GitHub (pinned by tag and commit), `python-sdbus` from PyPI
+and the Rust crates from crates.io (`cargo fetch --locked` in `prepare()`). The build
+takes a while (Rust, Qt). The same two files are attached to every release (`PKGBUILD`
+and `network-manager-gpclient.install`, listed in `SHA256SUMS`): download both into one
+directory and run `makepkg -si` there; use the file of the release you want, because it
+builds that version. The packages from `makepkg` are not signed by this project.
+
 ### Single files
 
 The release assets are the same packages, but unsigned: only the repository
@@ -128,6 +148,14 @@ arch/build.sh --install-test                 # install them in a fresh container
 on another machine needs QEMU binfmt). The recipe is `arch/PKGBUILD`, the hooks are
 `arch/network-manager-gpclient.install`, and the package version comes from
 `debian/changelog` (`rpm/debian_changelog.py`).
+
+`arch/standalone-test.sh` tests the user mode: it makes local git mirrors of the checkout
+and its submodules, points a copy of the PKGBUILD at them (only the URLs change), runs
+plain `makepkg -s` in a fresh container and installs the result. CI runs it as the job
+`build-arch-standalone` (pull requests and manual runs with `arch_linux`; nothing is
+published). `tests/unit/test_arch_build.py` keeps the values in the PKGBUILD (version,
+submodule commits, URLs, `python-sdbus`) equal to `debian/changelog`, the submodules,
+`.gitmodules` and `rpm/sources`: change them together at a release or a submodule bump.
 
 CI (`build-release.yml`, job `build-arch`) builds the packages on every pull
 request, checks the file names, installs the packages in a fresh container
