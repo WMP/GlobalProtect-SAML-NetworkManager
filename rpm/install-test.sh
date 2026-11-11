@@ -110,6 +110,10 @@ case "${ID:-}" in
             [ "$attempt" -lt 5 ] || fail "zypper refresh failed $attempt times"
             sleep 30
         done
+        # The image has no SELinux policy: with it %post loads the module of the package,
+        # and the label of the unit file is checked below (Fedora and EL: a hard Requires)
+        "${install_cmd[@]}" selinux-policy-targeted policycoreutils \
+            || echo "Note: no SELinux policy can be installed in this image: the unit file label is not checked"
         ;;
     *)
         install_cmd=(dnf -y --setopt=install_weak_deps=False install)
@@ -160,6 +164,17 @@ for path in \
     "$(rpm --eval '%{_libdir}')/qt6/plugins/plasma/network/vpn/plasmanetworkmanagement_gpclientui.json"; do
     [ -e "$path" ] || fail "missing file $path"
 done
+
+# SELinux (#183): the installed policy gives the unit file its own type, so that
+# NetworkManager may start it. Without a policy (or matchpathcon) there is nothing to check.
+if [ -e /etc/selinux/config ] && command -v matchpathcon >/dev/null 2>&1; then
+    context=$(matchpathcon /usr/lib/systemd/system/nm-gpclient.service) \
+        || fail "matchpathcon /usr/lib/systemd/system/nm-gpclient.service"
+    grep -q ':nm_gpclient_unit_file_t:' <<<"$context" \
+        || fail "the unit file does not get nm_gpclient_unit_file_t: $context"
+else
+    echo "Note: no SELinux policy or no matchpathcon in this image: the unit file label is not checked"
+fi
 
 # The catalogs are %lang(pl): rpm skips them on images that install only some
 # languages (%_install_langs, e.g. Fedora and EL containers), so check the

@@ -120,6 +120,9 @@ release, `sudo pacman -Syyuu` (downgrades to the repository's version).
 - No SELinux policy (Arch has none by default) and no change of
   `/etc/nsswitch.conf`. pacman reloads systemd itself; the install script
   reloads D-Bus and stops an old running service.
+- The AppArmor profile of the service (complain mode, blocks nothing) is in
+  `/etc/apparmor.d/`; the install script loads it when AppArmor is active
+  (`apparmor` is an optional dependency). See [PACKAGING.md](PACKAGING.md).
 - The Plasma plugin links plasma-nm's private libraries. Arch is rolling: after a
   Plasma update it can fail to load until the next release of the plugin is built
   against the new Plasma.

@@ -1,0 +1,1 @@
+/usr/lib/systemd/system/nm-gpclient\.service	--	gen_context(system_u:object_r:nm_gpclient_unit_file_t,s0)

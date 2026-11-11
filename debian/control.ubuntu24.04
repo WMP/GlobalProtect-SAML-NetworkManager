@@ -3,6 +3,7 @@ Section: net
 Priority: optional
 Maintainer: WMP <45381+WMP@users.noreply.github.com>
 Build-Depends: debhelper-compat (= 13),
+               dh-apparmor,
                gettext,
                pkg-config,
                libglib2.0-dev,

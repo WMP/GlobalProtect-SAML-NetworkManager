@@ -1,0 +1,27 @@
+# AppArmor profile of the GlobalProtect VPN service (#183). Complain mode:
+# it blocks nothing; every access that the rules below do not allow is
+# logged (journalctl -k | grep apparmor), to build an enforcing profile later.
+abi <abi/3.0>,
+
+include <tunables/global>
+
+profile nm-gpclient-service /usr/lib/NetworkManager/nm-gpclient-service flags=(complain) {
+  include <abstractions/base>
+
+  # The script starts with "#!/usr/bin/env python3": env and the interpreter are
+  # separate execs, and they stay under this profile (else the rules below never apply).
+  # AppArmor checks the resolved path: on Ubuntu 26.04 env is a link to Rust coreutils,
+  # or to gnuenv with coreutils-from-gnu.
+  /usr/{bin,lib/cargo/bin/coreutils}/env ix,
+  /usr/bin/gnuenv ix,
+  /usr/bin/python3* ix,
+
+  # gpclient (root) stays under this profile. gpauth runs as the desktop user
+  # and starts the browser: it runs unconfined, as without this profile, so
+  # the browser keeps its own profile (for example Chrome's user namespaces on
+  # Ubuntu 24.04 and later). "ux", not "Ux": the environment is not scrubbed.
+  /usr/bin/gpclient ix,
+  /usr/bin/gpauth ux,
+
+  include if exists <local/usr.lib.NetworkManager.nm-gpclient-service>
+}

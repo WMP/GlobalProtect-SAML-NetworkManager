@@ -54,6 +54,7 @@ for path in \
     /usr/libexec/nm-gpclient-auth-dialog \
     /usr/share/applications/gpgui.desktop \
     /usr/lib/systemd/system/nm-gpclient.service \
+    /etc/apparmor.d/usr.lib.NetworkManager.nm-gpclient-service \
     /usr/share/dbus-1/system-services/org.freedesktop.NetworkManager.gpclient.service \
     /usr/share/dbus-1/system.d/nm-gpclient.conf \
     /etc/vpnc/connect.d/90-gpclient-routing \

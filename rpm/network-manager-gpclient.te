@@ -1,4 +1,4 @@
-module network-manager-gpclient 1.0;
+module network-manager-gpclient 1.1;
 
 require {
     type NetworkManager_t;
@@ -7,6 +7,7 @@ require {
     type session_dbusd_tmp_t;
     class chr_file { getattr open read write ioctl };
     class sock_file getattr;
+    class service { start status };
 }
 
 # NetworkManager runs the program of the .name file itself (not by D-Bus
@@ -18,3 +19,12 @@ require {
 allow NetworkManager_t devpts_t:chr_file { getattr open read write ioctl };
 allow NetworkManager_t ptmx_t:chr_file { getattr open read write ioctl };
 allow NetworkManager_t session_dbusd_tmp_t:sock_file getattr;
+
+# The program NetworkManager starts hands over to nm-gpclient.service with
+# "systemctl start" (hand_over_to_unit), so that the VPN service runs in the
+# unit and not in NetworkManager_t (#183). The unit file gets a type of its
+# own (network-manager-gpclient.fc): NetworkManager may start this unit only,
+# not any unit of the generic systemd_unit_file_t.
+type nm_gpclient_unit_file_t;
+systemd_unit_file(nm_gpclient_unit_file_t)
+allow NetworkManager_t nm_gpclient_unit_file_t:service { start status };

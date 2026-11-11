@@ -146,11 +146,41 @@ are built with `rpm/build.sh <target> <amd64|arm64>`: see [RPM_REPO.md](RPM_REPO
 Arch Linux packages (the same three, `x86_64` only, `arch/PKGBUILD`) are built with
 `arch/build.sh`: see [ARCH_REPO.md](ARCH_REPO.md).
 
-On Fedora and EL, the core RPM also installs the
-`network-manager-gpclient` SELinux policy module. The NetworkManager-launched
-VPN service needs access to its PTY (`ptmx`/`devpts`) and to inspect the
-desktop session bus socket while starting SAML authentication. The module is
-loaded by the RPM scriptlets and removed when the package is removed.
+### Mandatory access control
+
+**SELinux (every RPM target: Fedora, EL, openSUSE).** The core RPM installs the
+`network-manager-gpclient` SELinux policy module (`rpm/network-manager-gpclient.te`
+and `.fc`). NetworkManager starts the program of the plugin in the domain
+`NetworkManager_t`; the program hands over to `nm-gpclient.service` with
+`systemctl start`. The module allows this and nothing else for the unit:
+
+- The unit file has its own type, `nm_gpclient_unit_file_t`. The RPM relabels
+  it with `%selinux_relabel_pre` (`%pre`) and `%selinux_relabel_post`
+  (`%posttrans`), which also work in transactional updates. NetworkManager may
+  `start` and get the `status` of this unit only, not of every unit file.
+- The service needs its PTY (`ptmx`/`devpts`) and must inspect the desktop
+  session bus socket while it starts SAML authentication. This applies when it
+  runs in `NetworkManager_t`.
+
+The module is loaded by the RPM scriptlets and removed when the package is
+removed. On openSUSE the RPM requires the SELinux policy only when SELinux is
+installed (AppArmor is still an install option there).
+
+**AppArmor (`.deb` and Arch Linux), complain mode.** The package installs
+`/etc/apparmor.d/usr.lib.NetworkManager.nm-gpclient-service`
+(`config/apparmor/`). The profile is in complain mode: it blocks nothing. It
+logs every access that its rules do not allow, to build an enforcing profile
+later. To read the log lines:
+
+```bash
+journalctl -k | grep apparmor
+```
+
+`env`, the Python interpreter and `gpclient` stay under the profile (`ix`; on Ubuntu 26.04 `env` resolves to Rust coreutils or to `gnuenv`, so the rules name every path). `gpauth` runs unconfined (`ux`), so
+that the browser keeps its own profile. To add local rules, use
+`/etc/apparmor.d/local/usr.lib.NetworkManager.nm-gpclient-service`. The Debian
+package loads the profile with `dh_apparmor`; on Arch Linux the install script
+loads it when AppArmor is active, and `apparmor` is an optional dependency.
 
 ### Version in `debian/changelog`
 

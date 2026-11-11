@@ -259,6 +259,9 @@ def test_pkgbuild_pin_gives_a_valid_range():
         assert out == upper
 
 
+APPARMOR_PROFILE = "/etc/apparmor.d/usr.lib.NetworkManager.nm-gpclient-service"
+
+
 def spec_config_files():
     return sorted(re.findall(r"^%config\(noreplace\) (\S+)$", read("rpm/network-manager-gpclient.spec"), re.M))
 
@@ -269,7 +272,8 @@ def test_pkgbuild_backs_up_the_config_files_of_the_spec():
     assert backup
     spec = [path.replace("%{_sysconfdir}", "etc") for path in spec_config_files()]
     assert len(spec) == 4
-    assert sorted(backup.group(1).split()) == sorted(spec)
+    # and the AppArmor profile, which only the Debian and Arch packages ship
+    assert sorted(backup.group(1).split()) == sorted(spec + [APPARMOR_PROFILE.lstrip("/")])
     assert "backup=" not in pkgbuild_function("package_network-manager-gpclient-gnome") and text
 
 
@@ -279,6 +283,25 @@ def test_pkgbuild_with_another_backup_list_is_found():
     changed = body.replace(" etc/vpnc/reconnect.d/90-gpclient-notify", "", 1)
     backup = re.search(r"^  backup=\((.*?)\)$", changed, re.M | re.S).group(1).split()
     assert sorted(backup) != sorted(spec)
+
+
+def installs_the_apparmor_profile(body):
+    return ("install -D -m 0644 config/apparmor/usr.lib.NetworkManager.nm-gpclient-service \\\n"
+            '    "$pkgdir%s"' % APPARMOR_PROFILE) in body
+
+
+def test_pkgbuild_installs_the_apparmor_profile_as_a_config_file_and_suggests_apparmor():
+    body = pkgbuild_function("package_network-manager-gpclient")
+    assert installs_the_apparmor_profile(body)
+    assert "optdepends=('apparmor: AppArmor profile of the VPN service (complain mode)')" in body
+    assert "apparmor" not in re.search(r"^  depends=\((.*?)\)$", body, re.M | re.S).group(1)
+    assert APPARMOR_PROFILE in read("arch/install-test.sh")
+
+
+def test_pkgbuild_without_the_apparmor_profile_is_found():
+    body = pkgbuild_function("package_network-manager-gpclient")
+    assert not installs_the_apparmor_profile(body.replace("$pkgdir/etc/apparmor.d/", "$pkgdir/etc/other/"))
+    assert not installs_the_apparmor_profile(body.replace("install -D -m 0644 config/apparmor/", "# "))
 
 
 def test_pkgbuild_builds_what_the_spec_builds():
@@ -311,6 +334,8 @@ def test_pkgbuild_installs_what_the_spec_installs_to_the_same_places():
     spec = [item for item in spec if "selinux" not in item[2]]
     # the licenses and the README are %license and %doc in the spec, installed by hand here
     arch = [item for item in arch if not item[2].startswith(("/usr/share/licenses/", "/usr/share/doc/"))]
+    # the AppArmor profile has no counterpart in the spec (SELinux there); see the test below
+    arch = [item for item in arch if item[2] != APPARMOR_PROFILE]
     assert len(spec) >= 20
     assert sorted(spec) == sorted(arch)
 
@@ -351,18 +376,22 @@ def test_pkgbuild_strips_the_rust_binaries_like_the_spec():
 # --- arch/network-manager-gpclient.install ---
 
 
-def run_hook(tmp_path, call, present=True):
+def run_hook(tmp_path, call, present=True, apparmor=True):
     """Run a hook function of the .install file with a fake dbus-send, pkill and systemctl"""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     log = tmp_path / "calls"
-    for name in ("dbus-send", "pkill", "systemctl"):
+    for name in ("dbus-send", "pkill", "systemctl", "apparmor_parser"):
         (bin_dir / name).write_text(f'#!/bin/sh\necho "{name} $*" >> "{log}"\nexit 1\n')
         (bin_dir / name).chmod(0o755)
     # the hooks test for /usr/bin/dbus-send and /usr/bin/pkill: use stand-ins of the same name
     script = (os.path.join(ARCH_DIR, "network-manager-gpclient.install"))
     where = str(bin_dir) if present else str(tmp_path / "nothing-here")
+    # the AppArmor file system: a directory when AppArmor is active
+    (tmp_path / "securityfs").mkdir(exist_ok=True)
+    kernel = str(tmp_path / "securityfs") if apparmor else str(tmp_path / "no-apparmor")
     text = open(script, encoding="utf-8").read().replace("/usr/bin/dbus-send", where + "/dbus-send") \
+        .replace("/usr/bin/apparmor_parser", where + "/apparmor_parser").replace("/sys/kernel/security/apparmor", kernel) \
         .replace("/usr/bin/pkill", where + "/pkill").replace("[ -d /run/systemd/system ]", "true" if present else "false")
     (tmp_path / "hook.sh").write_text(text)
     result = subprocess.run(["sh", "-c", f'. "{tmp_path}/hook.sh"; {call}'], capture_output=True, text=True,
@@ -386,6 +415,31 @@ def test_the_removal_stops_the_service_and_reloads_dbus_and_never_fails(tmp_path
     assert "systemctl stop nm-gpclient.service" in calls
     assert any("ReloadConfig" in c for c in calls)
     assert not any(c.startswith("pkill") for c in calls)
+
+
+@pytest.mark.parametrize("hook", ["post_install", "post_upgrade"])
+def test_the_install_hooks_load_the_apparmor_profile_when_apparmor_is_active(tmp_path, hook):
+    result, calls = run_hook(tmp_path, hook)
+
+    assert result.returncode == 0, result.stderr
+    assert f"apparmor_parser -r -W {APPARMOR_PROFILE}" in calls
+
+
+def test_the_removal_unloads_the_apparmor_profile_when_apparmor_is_active(tmp_path):
+    result, calls = run_hook(tmp_path, "pre_remove")
+
+    assert result.returncode == 0, result.stderr
+    assert f"apparmor_parser -R {APPARMOR_PROFILE}" in calls
+
+
+@pytest.mark.parametrize("call", ["post_install", "post_upgrade", "pre_remove"])
+def test_the_hooks_do_not_call_apparmor_parser_without_apparmor(tmp_path, call):
+    # AppArmor is not active (no /sys/kernel/security/apparmor): the hooks succeed and do not call it
+    result, calls = run_hook(tmp_path, call, apparmor=False)
+
+    assert result.returncode == 0, result.stderr
+    assert not any(c.startswith("apparmor_parser") for c in calls)
+    assert calls
 
 
 def test_the_hooks_do_nothing_without_the_tools(tmp_path):

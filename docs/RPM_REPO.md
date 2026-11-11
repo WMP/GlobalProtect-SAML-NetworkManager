@@ -101,6 +101,10 @@ sudo zypper removerepo network-manager-gpclient
   (Debian packages before 2.0.0 added `resolve` to its `hosts:` line). Fedora
   and EL manage that file with `authselect`, and Fedora uses systemd-resolved
   by default.
+- Every target installs an SELinux policy module (Fedora, EL and openSUSE
+  Leap 16 / Tumbleweed use SELinux by default). It gives `nm-gpclient.service` its own type, so
+  that NetworkManager may start it (#183); see [PACKAGING.md](PACKAGING.md). `rpm/install-test.sh`
+  checks the label with `matchpathcon`.
 - openSUSE does not use systemd-resolved by default; the VPN DNS then follows
   what vpnc-script does without it. This is not tested with a real VPN yet.
 - On openSUSE the service and the auth dialog start with the versioned Python

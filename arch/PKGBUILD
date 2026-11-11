@@ -153,9 +153,12 @@ package_network-manager-gpclient() {
   # The same files as globalprotect-openconnect and its AUR variant
   conflicts=(globalprotect-openconnect globalprotect-openconnect-git)
   install=network-manager-gpclient.install
-  # The hooks in /etc/vpnc: %config(noreplace) of the spec
+  # AppArmor is optional on Arch: the profile (complain mode) is loaded only when it is active
+  optdepends=('apparmor: AppArmor profile of the VPN service (complain mode)')
+  # The hooks in /etc/vpnc: %config(noreplace) of the spec; and the AppArmor profile
   backup=(etc/vpnc/connect.d/90-gpclient-routing etc/vpnc/disconnect.d/90-gpclient-routing
-    etc/vpnc/post-connect.d/90-gpclient-notify etc/vpnc/reconnect.d/90-gpclient-notify)
+    etc/vpnc/post-connect.d/90-gpclient-notify etc/vpnc/reconnect.d/90-gpclient-notify
+    etc/apparmor.d/usr.lib.NetworkManager.nm-gpclient-service)
   cd "$srcdir/$_dir"
 
   # The translations (po/LINGUAS): each domain goes to its own package
@@ -177,6 +180,8 @@ package_network-manager-gpclient() {
 
   install -D -m 0644 config/nm-gpclient.service \
     "$pkgdir/usr/lib/systemd/system/nm-gpclient.service"
+  install -D -m 0644 config/apparmor/usr.lib.NetworkManager.nm-gpclient-service \
+    "$pkgdir/etc/apparmor.d/usr.lib.NetworkManager.nm-gpclient-service"
   install -D -m 0644 config/org.freedesktop.NetworkManager.gpclient.service \
     "$pkgdir/usr/share/dbus-1/system-services/org.freedesktop.NetworkManager.gpclient.service"
   install -D -m 0644 config/nm-gpclient.conf \
