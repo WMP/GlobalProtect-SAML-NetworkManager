@@ -295,7 +295,7 @@ PYTHONPATH=%{buildroot}%{python3_sitearch} /usr/bin/python3 -c 'import sdbus'
 
 %pre
 %if 0%{?fedora} || 0%{?rhel} || 0%{?suse_version}
-# With %selinux_relabel_post: the unit file gets its own type (network-manager-gpclient.fc),
+# With the relabel in posttrans: the unit file gets its own type (network-manager-gpclient.fc),
 # so that NetworkManager may start it (#183); the macros also work in transactional updates
 %selinux_relabel_pre
 %endif

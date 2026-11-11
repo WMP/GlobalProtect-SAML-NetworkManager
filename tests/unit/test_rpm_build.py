@@ -81,6 +81,41 @@ def test_spec_takes_everything_from_the_build_script():
     assert len(re.findall(r"^%changelog", spec, re.M)) == 1
 
 
+def comment_macro_problems(spec):
+    """Comment lines that name a macro: rpmbuild expands macros in comments too, and a
+    multi-line macro (%selinux_relabel_post) breaks the scriptlet it is in (#183)"""
+    return [
+        line
+        for line in spec.splitlines()
+        if line.lstrip().startswith("#")
+        and re.search(r"(?<!%)%(?!%|changelog\b)[{?a-z_]", line.replace("%%", ""))
+    ]
+
+
+def test_spec_comments_name_no_macro():
+    assert comment_macro_problems(read("rpm/network-manager-gpclient.spec")) == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "# With %selinux_relabel_post: the unit file is relabeled",
+        "    # the copy in %{_datadir}/selinux",
+        "# %?fedora only",
+    ],
+)
+def test_the_comment_check_rejects_a_macro_in_a_comment(line):
+    assert comment_macro_problems(f"%pre\n{line}\n") == [line]
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["# appends the %changelog of debian", "# 100%% of the files", "%selinux_relabel_pre", "# no macro"],
+)
+def test_the_comment_check_accepts_text_without_a_macro(line):
+    assert comment_macro_problems(f"{line}\n") == []
+
+
 def test_spec_does_not_hard_code_what_the_script_derives():
     spec = read("rpm/network-manager-gpclient.spec")
     assert not re.search(r"^Version:\s+\d", spec, re.M)
