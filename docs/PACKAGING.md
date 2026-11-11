@@ -176,7 +176,7 @@ later. To read the log lines:
 journalctl -k | grep apparmor
 ```
 
-`env`, the Python interpreter and `gpclient` stay under the profile (`ix`; on Ubuntu 26.04 `env` is Rust coreutils, so the rule names both paths). `gpauth` runs unconfined (`ux`), so
+`env`, the Python interpreter and `gpclient` stay under the profile (`ix`; on Ubuntu 26.04 `env` resolves to Rust coreutils or to `gnuenv`, so the rules name every path). `gpauth` runs unconfined (`ux`), so
 that the browser keeps its own profile. To add local rules, use
 `/etc/apparmor.d/local/usr.lib.NetworkManager.nm-gpclient-service`. The Debian
 package loads the profile with `dh_apparmor`; on Arch Linux the install script

@@ -88,7 +88,7 @@ def comment_macro_problems(spec):
         line
         for line in spec.splitlines()
         if line.lstrip().startswith("#")
-        and re.search(r"(?<!%)%(?!%|changelog\b)[{?a-z_]", line.replace("%%", ""))
+        and re.search(r"(?<!%)%(?!%|changelog\b)[{?(\[A-Za-z_]", line.replace("%%", ""))
     ]
 
 
@@ -102,6 +102,9 @@ def test_spec_comments_name_no_macro():
         "# With %selinux_relabel_post: the unit file is relabeled",
         "    # the copy in %{_datadir}/selinux",
         "# %?fedora only",
+        "# %(rm -rf x) runs a shell",
+        "# %[1+1] is an expression",
+        "# %SOURCE1 is the archive",
     ],
 )
 def test_the_comment_check_rejects_a_macro_in_a_comment(line):

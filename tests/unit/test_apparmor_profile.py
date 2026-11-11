@@ -17,6 +17,7 @@ NAME = "usr.lib.NetworkManager.nm-gpclient-service"
 SERVICE = "/usr/lib/NetworkManager/nm-gpclient-service"
 CORE = "network-manager-gpclient"
 ENV_RULE = "  /usr/{bin,lib/cargo/bin/coreutils}/env ix,\n"
+GNUENV_RULE = "  /usr/bin/gnuenv ix,\n"
 
 
 def read(path):
@@ -55,7 +56,10 @@ def profile_problems(text, shebang=None):
     # the gpclient and gpauth rules never apply
     if shebang not in ("#!/usr/bin/env python3", "#!/usr/bin/python3"):
         problems.append(f"unknown shebang {shebang}")
-    if shebang == "#!/usr/bin/env python3" and not re.search(r"^\s*/usr/\{bin,lib/cargo/bin/coreutils\}/env ix,$", text, re.M):
+    if shebang == "#!/usr/bin/env python3" and not (
+        re.search(r"^\s*/usr/\{bin,lib/cargo/bin/coreutils\}/env ix,$", text, re.M)
+        and re.search(r"^\s*/usr/bin/gnuenv ix,$", text, re.M)
+    ):
         problems.append("env does not stay under the profile (ix)")
     if not re.search(r"^\s*/usr/bin/python3\* ix,$", text, re.M):
         problems.append("the interpreter does not stay under the profile (ix)")
@@ -142,6 +146,9 @@ def test_the_profile_check_rejects_a_changed_profile(old, new):
         (ENV_RULE, ENV_RULE.replace(" ix,", " px,")),
         # Ubuntu 26.04: /usr/bin/env resolves to Rust coreutils, which AppArmor checks
         (ENV_RULE, "  /usr/bin/env ix,\n"),
+        # Ubuntu 26.04 with coreutils-from-gnu: /usr/bin/env resolves to gnuenv
+        (GNUENV_RULE, ""),
+        (GNUENV_RULE, GNUENV_RULE.replace(" ix,", " ux,")),
         ("  /usr/bin/python3* ix,\n", ""),
         ("  /usr/bin/python3* ix,\n", "  /usr/bin/python3* ux,\n"),
         ("  /usr/bin/python3* ix,\n", "  /usr/bin/python3* px,\n"),
