@@ -299,7 +299,9 @@ connection, and this plugin has it
   script without admin rights. Make the connection available to all users to use
   a custom HIP script.
 - The certificate files (`usercert`, `userkey`) are read with the permissions of
-  the connection's user.
+  the desktop user (for a connection limited to one user: that user).
+- The refusal of `hip-script` applies with every NetworkManager version, also
+  before 1.58, where private connections worked without plugin support.
 
 To make a connection available to all users:
 

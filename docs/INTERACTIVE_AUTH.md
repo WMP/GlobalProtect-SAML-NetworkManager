@@ -182,8 +182,11 @@ nmcli connection modify "My VPN" vpn.secrets cert-pass=...
   gpclient. Both must be absolute paths.
 - **The files must be owned by the desktop user** (the user whose session shows
   the browser) and be regular files of at most 1 MiB (a link is followed). They
-  must be readable by that user too. The service opens each file once, checks
-  the open file, and gives gpclient (root) and gpauth a private copy in a
+  must be readable by that user too. A short helper process that runs as the
+  desktop user opens each file once, checks the open file and reads it, so a
+  file in a directory that the user cannot enter is refused, even if root could
+  read it (#183). The service (root) only writes the copy: it gives gpclient
+  (root) and gpauth a private copy in a
   directory below `/run/nm-gpclient` that only root can write: owned by the
   desktop user, mode `0400`, with the extension of the original. gpclient never
   reads your path, so changing or replacing the original after the check does
