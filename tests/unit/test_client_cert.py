@@ -12,8 +12,13 @@ Run with: make test-unit  (or: python3 -m pytest tests/unit -v)
 
 import asyncio
 import os
+import pwd
+import shutil
 import signal
 import stat
+import subprocess
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -25,7 +30,18 @@ VPN_PASSWORD = "Vp#Password1"
 CERT_PASS = "Cert#Pass2"
 
 
-DESKTOP_UID = 4242  # a desktop user other than root, when the tests run as root
+# A desktop user other than root, when the tests run as root: the file is read
+# by a helper that runs as this user, so the user must exist
+DESKTOP_UID = pwd.getpwnam("nobody").pw_uid if os.getuid() == 0 else os.getuid()
+# Another user that exists (the file is "not owned" by the desktop user)
+OTHER_UID = (
+    next((p.pw_uid for p in pwd.getpwall() if p.pw_uid not in (0, DESKTOP_UID)), None)
+    if os.getuid() == 0
+    else DESKTOP_UID + 1
+)
+needs_other_uid = pytest.mark.skipif(
+    OTHER_UID is None, reason="needs a second user besides root and nobody"
+)
 
 
 def _desktop_user(service_module, monkeypatch, tmp_path, uid):
@@ -41,16 +57,25 @@ def _desktop_user(service_module, monkeypatch, tmp_path, uid):
 @pytest.fixture
 def me(service_module, monkeypatch, tmp_path):
     """The desktop user: the current user, or DESKTOP_UID when root"""
-    uid = os.getuid() or DESKTOP_UID
-    _desktop_user(service_module, monkeypatch, tmp_path, uid)
-    return uid
+    _desktop_user(service_module, monkeypatch, tmp_path, DESKTOP_UID)
+    return DESKTOP_UID
 
 
 @pytest.fixture
-def cert_files(tmp_path, me):
+def udir():
+    """A directory of the desktop user's files that the user can enter (tmp_path
+    is below a root-only directory when the tests run as root)"""
+    path = tempfile.mkdtemp()
+    os.chmod(path, 0o711)
+    yield path
+    shutil.rmtree(path, ignore_errors=True)
+
+
+@pytest.fixture
+def cert_files(udir, me):
     """A certificate and a key owned by the desktop user"""
-    cert = tmp_path / "me.pem"
-    key = tmp_path / "me.key"
+    cert = Path(udir) / "me.pem"
+    key = Path(udir) / "me.key"
     for f, text in ((cert, "cert"), (key, "key")):
         f.write_text(text)
         os.chown(f, me, -1) if os.getuid() == 0 else None
@@ -343,8 +368,8 @@ def test_a_file_of_the_desktop_user_is_copied(service_module, tmp_path, me, cert
         ("a.p12;touch x", ""),  # an odd extension is not kept
     ],
 )
-def test_the_copy_keeps_a_plain_extension(service_module, tmp_path, me, name, ext):
-    path = _own(_touch(tmp_path / name), me)
+def test_the_copy_keeps_a_plain_extension(service_module, tmp_path, udir, me, name, ext):
+    path = _own(_touch(Path(udir) / name), me)
 
     copy = _copy(service_module, tmp_path, path, me)
 
@@ -362,8 +387,8 @@ def test_a_file_changed_after_the_copy_does_not_change_the_copy(
     assert open(copy).read() == "cert"
 
 
-def test_a_fifo_does_not_block(service_module, tmp_path, me):
-    fifo = tmp_path / "fifo"
+def test_a_fifo_does_not_block(service_module, tmp_path, udir, me):
+    fifo = Path(udir) / "fifo"
     os.mkfifo(fifo)
     _own(fifo, me)
 
@@ -380,8 +405,8 @@ def test_a_fifo_does_not_block(service_module, tmp_path, me):
         signal.signal(signal.SIGALRM, old)
 
 
-def test_the_largest_file_is_copied(service_module, tmp_path, me):
-    path = tmp_path / "max.pem"
+def test_the_largest_file_is_copied(service_module, tmp_path, udir, me):
+    path = Path(udir) / "max.pem"
     path.write_bytes(b"x" * service_module.CERT_FILE_MAX_BYTES)
     _own(path, me)
 
@@ -399,15 +424,22 @@ def _big(tmp_path, uid):
 @pytest.mark.parametrize(
     "make, uid_shift, word",
     [
-        (lambda t, u: str(t), 0, "not a regular file"),  # a directory
+        (lambda t, u: "/usr", 0, "not a regular file"),  # a directory
         (lambda t, u: "/dev/zero", 0, "not a regular file"),
         (_big, 0, "larger than"),
-        (lambda t, u: _own(_touch(t / "o.pem"), u), 1, "not owned"),  # another owner
+        pytest.param(  # another owner
+            lambda t, u: _own(_touch(t / "o.pem"), u),
+            (OTHER_UID or DESKTOP_UID) - DESKTOP_UID,
+            "not owned",
+            marks=needs_other_uid,
+        ),
         (lambda t, u: str(t / "missing"), 0, "cannot read"),
     ],
 )
-def test_copy_cert_file_rejects(service_module, tmp_path, me, make, uid_shift, word):
-    path = make(tmp_path, me)
+def test_copy_cert_file_rejects(
+    service_module, tmp_path, udir, me, make, uid_shift, word
+):
+    path = make(Path(udir), me)
 
     with pytest.raises(ValueError, match=word):
         _copy(service_module, tmp_path, path, me + uid_shift)
@@ -419,17 +451,106 @@ def _touch(path):
     return path
 
 
+@needs_other_uid
 def test_a_symlink_is_followed_and_the_target_is_checked(
-    service_module, tmp_path, me
+    service_module, tmp_path, udir, me
 ):
-    target = _touch(tmp_path / "t.pem")
+    target = _touch(Path(udir) / "t.pem")
     _own(target, me)
-    link = tmp_path / "l.pem"
+    link = Path(udir) / "l.pem"
     link.symlink_to(target)
 
     assert open(_copy(service_module, tmp_path, str(link), me)).read() == "x"
     with pytest.raises(ValueError, match="not owned"):
-        _copy(service_module, tmp_path, str(link), me + 1)
+        _copy(service_module, tmp_path, str(link), OTHER_UID)
+
+
+def _root_only(f):
+    return pytest.mark.skipif(os.getuid() != 0, reason="needs root to switch users")(f)
+
+
+@_root_only
+def test_a_file_in_a_directory_the_user_cannot_enter_is_rejected(
+    service_module, tmp_path, udir, me
+):
+    # Root could read it, the user cannot: root must not read it for the user
+    hidden = Path(udir) / "hidden"
+    hidden.mkdir()
+    hidden.chmod(0o700)  # owned by root
+    _own(_touch(hidden / "me.pem"), me)
+
+    with pytest.raises(ValueError, match="cannot read"):
+        _copy(service_module, tmp_path, str(hidden / "me.pem"), me)
+    assert not os.listdir(tmp_path / "copies")
+
+
+@_root_only
+def test_the_helper_runs_as_the_user_not_as_root(service_module, tmp_path, udir, me):
+    path = _own(_touch(Path(udir) / "secret.pem"), me)
+    os.chmod(path, 0o000)  # root would read it, the owner cannot
+
+    with pytest.raises(ValueError, match="cannot read"):
+        _copy(service_module, tmp_path, path, me)
+
+
+@_root_only
+def test_a_user_that_does_not_exist_means_no_file_is_read(service_module, tmp_path, udir):
+    uid = max(p.pw_uid for p in pwd.getpwall()) + 1
+
+    with pytest.raises(ValueError, match="no user with uid"):
+        _copy(service_module, tmp_path, str(_touch(Path(udir) / "x.pem")), uid)
+
+
+def test_the_parent_does_not_trust_the_size_the_helper_reports(
+    service_module, monkeypatch, tmp_path, udir, me
+):
+    path = _own(_touch(Path(udir) / "x.pem"), me)
+    big = b"x" * (service_module.CERT_FILE_MAX_BYTES + 1)
+    monkeypatch.setattr(
+        service_module.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, big, b""),
+    )
+
+    with pytest.raises(ValueError, match="larger than"):
+        _copy(service_module, tmp_path, path, me)
+    assert not os.listdir(tmp_path / "copies")
+
+
+def test_a_helper_that_hangs_is_a_read_failure(
+    service_module, monkeypatch, tmp_path, udir, me
+):
+    path = _own(_touch(Path(udir) / "x.pem"), me)
+
+    def hang(*a, **k):
+        raise subprocess.TimeoutExpired(a, 5)
+
+    monkeypatch.setattr(service_module.subprocess, "run", hang)
+
+    with pytest.raises(ValueError, match="cannot read the file"):
+        _copy(service_module, tmp_path, path, me)
+
+
+@pytest.mark.parametrize(
+    "code, stderr, reason",
+    [
+        (-9, b"", "exit -9"),  # killed by a signal, nothing on stderr
+        (1, b"Traceback (most recent call last):\n  ...\nMemoryError\n", "MemoryError"),
+    ],
+)
+def test_an_unknown_helper_failure_is_a_read_failure(
+    service_module, monkeypatch, tmp_path, udir, me, code, stderr, reason
+):
+    path = _own(_touch(Path(udir) / "x.pem"), me)
+    monkeypatch.setattr(
+        service_module.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, code, b"data", stderr),
+    )
+
+    with pytest.raises(ValueError, match=f"cannot read the file: {reason}$"):
+        _copy(service_module, tmp_path, path, me)
+    assert not os.listdir(tmp_path / "copies")
 
 
 def test_no_desktop_user_means_no_file_is_read(service_module, tmp_path, cert_files):
@@ -472,6 +593,7 @@ def test_a_bad_file_is_not_passed_to_gpclient(
     assert os.listdir(tmp_path / "run") == []  # no directory is left behind
 
 
+@needs_other_uid
 def test_the_desktop_uid_is_used_not_the_uid_of_the_service(
     service_module, monkeypatch, tmp_path, me, cert_files
 ):
@@ -480,7 +602,7 @@ def test_the_desktop_uid_is_used_not_the_uid_of_the_service(
     other.mkdir()
     # same file, but the desktop user is someone else than its owner
     assert not _spawn_attempt(
-        service_module, monkeypatch, other, me + 1, usercert=cert_files[0]
+        service_module, monkeypatch, other, OTHER_UID, usercert=cert_files[0]
     )
 
 
