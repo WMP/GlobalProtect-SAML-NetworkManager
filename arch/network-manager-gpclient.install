@@ -1,7 +1,8 @@
 # shellcheck shell=sh
 # Install hooks of network-manager-gpclient; they mirror %post and %postun of the RPM
 # spec. pacman reloads systemd (daemon-reload) itself, and Arch has no SELinux policy
-# of this package and no nsswitch.conf change.
+# of this package and no nsswitch.conf change. Where AppArmor is active, the hooks load
+# and unload its profile of the service (complain mode, #183; the Debian package does the same).
 
 reload_dbus() {
     # Reload the D-Bus configuration to pick up the service files
@@ -11,8 +12,15 @@ reload_dbus() {
     fi
 }
 
+apparmor_active() {
+    [ -x /usr/bin/apparmor_parser ] && [ -d /sys/kernel/security/apparmor ]
+}
+
 post_install() {
     reload_dbus
+    if apparmor_active; then
+        apparmor_parser -r -W /etc/apparmor.d/usr.lib.NetworkManager.nm-gpclient-service >/dev/null 2>&1 || :
+    fi
     # Stop a running (old) service, so that NetworkManager starts the new one
     # (it runs as "python3[.X] /usr/lib/NetworkManager/nm-gpclient-service"; its
     # process name is cut to 15 characters, so match the whole command line)
@@ -30,6 +38,9 @@ pre_remove() {
     # Stop the service (%systemd_preun of the RPM spec); the unit has no [Install] section
     if [ -d /run/systemd/system ]; then
         systemctl stop nm-gpclient.service >/dev/null 2>&1 || :
+    fi
+    if apparmor_active; then
+        apparmor_parser -R /etc/apparmor.d/usr.lib.NetworkManager.nm-gpclient-service >/dev/null 2>&1 || :
     fi
 }
 

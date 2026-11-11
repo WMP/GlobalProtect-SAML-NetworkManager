@@ -73,8 +73,10 @@ BuildRequires:  python3-pip
 BuildRequires:  python3-setuptools
 BuildRequires:  python3-wheel
 BuildRequires:  systemd-rpm-macros
-%if 0%{?fedora} || 0%{?rhel}
+%if 0%{?fedora} || 0%{?rhel} || 0%{?suse_version}
 BuildRequires:  selinux-policy-devel
+# the devel Makefile finds network-manager-gpclient.te and .fc with find
+BuildRequires:  findutils
 %endif
 %if 0%{?suse_version}
 # pkgconfig(openssl) resolves to libressl-devel on openSUSE; gpclient needs OpenSSL (3 or later)
@@ -106,8 +108,13 @@ Requires:       vpnc-script
 Conflicts:      globalprotect-openconnect
 # python-sdbus: no target ships it as a package (Debian/Ubuntu: python3-sdbus)
 Provides:       bundled(python3dist(sdbus)) = %{sdbus_version}
+%if 0%{?suse_version}
+# AppArmor is still an install option on openSUSE: the policy only when SELinux is there
+Requires:       (selinux-policy-targeted if selinux-policy)
+%else
 %if 0%{?fedora} || 0%{?rhel}
 Requires:       selinux-policy-targeted
+%endif
 %endif
 
 %description
@@ -158,7 +165,7 @@ connections.
 cp -p external/GlobalProtect-openconnect/LICENSE LICENSE.GPL-3.0
 
 %build
-%if 0%{?fedora} || 0%{?rhel}
+%if 0%{?fedora} || 0%{?rhel} || 0%{?suse_version}
 make -f /usr/share/selinux/devel/Makefile network-manager-gpclient.pp
 %endif
 # The openconnect crate builds the bundled openconnect and libxml2 (build.rs)
@@ -198,7 +205,7 @@ make install-mo MO_DOMAIN=NetworkManager-gpclient DESTDIR=%{buildroot}
 make install-mo MO_DOMAIN=plasmanetworkmanagement_gpclientui DESTDIR=%{buildroot}
 %find_lang NetworkManager-gpclient
 %find_lang plasmanetworkmanagement_gpclientui
-%if 0%{?fedora} || 0%{?rhel}
+%if 0%{?fedora} || 0%{?rhel} || 0%{?suse_version}
 install -D -m 0644 network-manager-gpclient.pp \
   %{buildroot}%{_datadir}/selinux/packages/network-manager-gpclient.pp
 %endif
@@ -287,8 +294,12 @@ PYTHONPATH=%{buildroot}%{python3_sitearch} /usr/bin/python3 -c 'import sdbus'
 (cd plugins/plasma/build && ctest --output-on-failure --no-tests=error)
 
 %post
-%if 0%{?fedora} || 0%{?rhel}
+%if 0%{?fedora} || 0%{?rhel} || 0%{?suse_version}
 %selinux_modules_install %{_datadir}/selinux/packages/network-manager-gpclient.pp
+# Give the unit file its own type (network-manager-gpclient.fc), so that NetworkManager may start it (#183)
+if /usr/sbin/selinuxenabled 2>/dev/null; then
+    /usr/sbin/restorecon %{_unitdir}/nm-gpclient.service >/dev/null 2>&1 || :
+fi
 %endif
 %systemd_post nm-gpclient.service
 # Reload the D-Bus configuration to pick up the new service files
@@ -310,7 +321,7 @@ fi
 
 %postun
 %systemd_postun nm-gpclient.service
-%if 0%{?fedora} || 0%{?rhel}
+%if 0%{?fedora} || 0%{?rhel} || 0%{?suse_version}
 if [ "$1" -eq 0 ]; then
     %selinux_modules_uninstall network-manager-gpclient
 fi
@@ -340,7 +351,7 @@ fi
 %{_unitdir}/nm-gpclient.service
 %{_datadir}/dbus-1/system-services/org.freedesktop.NetworkManager.gpclient.service
 %{_datadir}/applications/gpgui.desktop
-%if 0%{?fedora} || 0%{?rhel}
+%if 0%{?fedora} || 0%{?rhel} || 0%{?suse_version}
 %{_datadir}/selinux/packages/network-manager-gpclient.pp
 %endif
 %{_datadir}/dbus-1/system.d/nm-gpclient.conf

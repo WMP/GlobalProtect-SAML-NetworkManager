@@ -170,6 +170,10 @@ ifneq ($(HAS_CORE),)
 	install -D -m 644 config/nm-gpclient.service \
 		$(CURDIR)/debian/network-manager-gpclient/usr/lib/systemd/system/nm-gpclient.service
 
+	# AppArmor profile of the service (complain mode, #183); dh_apparmor loads it
+	install -D -m 644 config/apparmor/usr.lib.NetworkManager.nm-gpclient-service \
+		$(CURDIR)/debian/network-manager-gpclient/etc/apparmor.d/usr.lib.NetworkManager.nm-gpclient-service
+
 	# Install D-Bus service file for automatic activation
 	install -D -m 644 config/org.freedesktop.NetworkManager.gpclient.service \
 		$(CURDIR)/debian/network-manager-gpclient/usr/share/dbus-1/system-services/org.freedesktop.NetworkManager.gpclient.service
@@ -219,6 +223,13 @@ endif
 # process; NetworkManager starts the new one)
 override_dh_installsystemd:
 	dh_installsystemd --no-enable --no-start --no-restart-after-upgrade
+
+# dh_apparmor adds the snippets that load and unload the profile; it runs before dh_installdeb
+override_dh_installdeb:
+ifneq ($(HAS_CORE),)
+	dh_apparmor --profile-name=usr.lib.NetworkManager.nm-gpclient-service -pnetwork-manager-gpclient
+endif
+	dh_installdeb
 
 override_dh_auto_clean:
 	$(MAKE) clean || true

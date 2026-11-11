@@ -161,6 +161,17 @@ for path in \
     [ -e "$path" ] || fail "missing file $path"
 done
 
+# SELinux (#183): the installed policy gives the unit file its own type, so that
+# NetworkManager may start it. Without a policy (or matchpathcon) there is nothing to check.
+if [ -e /etc/selinux/config ] && command -v matchpathcon >/dev/null 2>&1; then
+    context=$(matchpathcon /usr/lib/systemd/system/nm-gpclient.service) \
+        || fail "matchpathcon /usr/lib/systemd/system/nm-gpclient.service"
+    grep -q ':nm_gpclient_unit_file_t:' <<<"$context" \
+        || fail "the unit file does not get nm_gpclient_unit_file_t: $context"
+else
+    echo "Note: no SELinux policy or no matchpathcon in this image: the unit file label is not checked"
+fi
+
 # The catalogs are %lang(pl): rpm skips them on images that install only some
 # languages (%_install_langs, e.g. Fedora and EL containers), so check the
 # package contents, not the disk

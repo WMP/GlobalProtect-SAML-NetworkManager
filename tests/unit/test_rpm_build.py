@@ -103,8 +103,10 @@ def test_spec_installs_what_debian_rules_installs():
         "plugins/plasma/build/plasmanetworkmanagement_gpclientui.so": "plugins/plasma/build/plasmanetworkmanagement_gpclientui.so",
     }
     missing = [s for s in sources if renamed.get(s, s) not in spec]
-    # The Qt 5 kservices file has no Plasma 6 counterpart
-    assert missing == ["plugins/plasma/plasmanetworkmanagement_gpclientui.desktop"]
+    # The Qt 5 kservices file has no Plasma 6 counterpart, and the AppArmor profile (complain
+    # mode, .deb and Arch) none: the RPM targets use SELinux
+    assert missing == ["plugins/plasma/plasmanetworkmanagement_gpclientui.desktop",
+                       "config/apparmor/usr.lib.NetworkManager.nm-gpclient-service"]
 
 
 def test_spec_files_has_the_url_handler_and_the_symlink_in_gnome():
@@ -781,6 +783,15 @@ def test_spec_neither_builds_nor_installs_nor_packages_gpservice():
     assert "gpservice" not in read("arch/PKGBUILD")
 
 
+def test_install_test_checks_the_label_of_the_unit_file_and_skips_without_a_policy():
+    text = read("rpm/install-test.sh")
+    assert "matchpathcon /usr/lib/systemd/system/nm-gpclient.service" in text
+    assert "nm_gpclient_unit_file_t" in text
+    # an image without /etc/selinux/config or matchpathcon is not a failure
+    assert '[ -e /etc/selinux/config ] && command -v matchpathcon' in text
+    assert "is not checked" in text
+
+
 def provides_exclude_pattern():
     spec = read("rpm/network-manager-gpclient.spec")
     match = re.search(r"^%global __provides_exclude (\S+)$", spec, re.M)
@@ -838,9 +849,12 @@ def test_check_stripped_rejects_a_file_that_is_not_elf(tmp_path):
     assert result.returncode == 1
 
 
-# --- SELinux module (Fedora and RHEL only) ---
+# --- SELinux module (every RPM target: Fedora, EL, openSUSE) ---
 
-SELINUX_GUARD = "0%{?fedora} || 0%{?rhel}"
+SELINUX_GUARD = "0%{?fedora} || 0%{?rhel} || 0%{?suse_version}"
+SELINUX_FEDORA_GUARD = "0%{?fedora} || 0%{?rhel}"
+SELINUX_UNIT_TYPE = "nm_gpclient_unit_file_t"
+SELINUX_UNIT_PATH = r"/usr/lib/systemd/system/nm-gpclient\.service"
 SELINUX_NAME = "network-manager-gpclient"
 SELINUX_UNINSTALL_CHECK = 'if [ "$1" -eq 0 ]; then'
 
@@ -876,10 +890,11 @@ def selinux_spec_problems(spec):
     problems = []
     wanted = {
         r"^BuildRequires:\s+selinux-policy-devel$": "",
-        r"^Requires:\s+selinux-policy-targeted$": "",
+        r"^BuildRequires:\s+findutils$": "",
         r"^make -f /usr/share/selinux/devel/Makefile ": "%build",
         r"%\{buildroot\}%\{_datadir\}/selinux/packages/": "%install",
         r"^%selinux_modules_install ": "%post",
+        r"^\s*/usr/sbin/restorecon %\{_unitdir\}/nm-gpclient\.service ": "%post",
         r"^\s*%selinux_modules_uninstall ": "%postun",
         r"^%\{_datadir\}/selinux/packages/": "%files",
     }
@@ -892,9 +907,26 @@ def selinux_spec_problems(spec):
                 problems.append(f"{text} is in {sec or 'the header'}, not in {section}")
             if stack != [SELINUX_GUARD]:
                 problems.append(f"{text} is under {stack}, not under {SELINUX_GUARD}")
+    # The unit file gets its type after the module is installed
+    order = [
+        next((i for i, (_s, _k, line) in enumerate(lines) if re.search(text, line)), None)
+        for text in (r"^%selinux_modules_install ", r"^\s*/usr/sbin/restorecon ")
+    ]
+    if None in order or order[0] > order[1]:
+        problems.append("restorecon is not after selinux_modules_install")
+    # Fedora and EL require the policy; openSUSE (AppArmor is still an install option there)
+    # only when SELinux is installed: a rich dependency, not a hard one
+    requires = {
+        r"^Requires:\s+selinux-policy-targeted$": ["!0%{?suse_version}", SELINUX_FEDORA_GUARD],
+        r"^Requires:\s+\(selinux-policy-targeted if selinux-policy\)$": ["0%{?suse_version}"],
+    }
+    for text, wanted_stack in requires.items():
+        found = [stack for _sec, stack, line in lines if re.search(text, line)]
+        if found != [wanted_stack]:
+            problems.append(f"{text} is under {found}, not under {wanted_stack}")
     # Every other line with "selinux" must be guarded as well
     for _sec, stack, line in lines:
-        if "selinux" in line.lower() and not line.lstrip().startswith("#") and SELINUX_GUARD not in stack:
+        if "selinux" in line.lower() and not line.lstrip().startswith(("#", "Requires:")) and SELINUX_GUARD not in stack:
             problems.append(f"not guarded: {line.strip()}")
     # The module is removed on erase only, not on upgrade
     for index, (_sec, _stack, line) in enumerate(lines):
@@ -930,6 +962,7 @@ EXPECTED_TE_RULES = {
     ("devpts_t", "chr_file", frozenset({"getattr", "open", "read", "write", "ioctl"})),
     ("ptmx_t", "chr_file", frozenset({"getattr", "open", "read", "write", "ioctl"})),
     ("session_dbusd_tmp_t", "sock_file", frozenset({"getattr"})),
+    (SELINUX_UNIT_TYPE, "service", frozenset({"start", "status"})),
 }
 
 
@@ -947,8 +980,30 @@ def selinux_te_problems(te):
         rules.add((target, cls, perm_set))
     if len(re.findall(r"^\s*allow\b", text, re.M)) != len(re.findall(r"^allow\s+\S+\s+\S+:\S+\s+(?:\{[^}]*\}|[^;\s]+)\s*;", text, re.M)):
         problems.append("an allow rule that the check cannot read")
+    # NetworkManager may start the unit of this package only: the type is declared here
+    # and made a systemd unit file type
+    if not re.search(rf"^type {SELINUX_UNIT_TYPE};", text, re.M):
+        problems.append(f"{SELINUX_UNIT_TYPE} is not declared")
+    if not re.search(rf"^systemd_unit_file\({SELINUX_UNIT_TYPE}\)", text, re.M):
+        problems.append(f"systemd_unit_file({SELINUX_UNIT_TYPE}) is missing")
     if rules != EXPECTED_TE_RULES:
         problems.append(f"rules differ from the expected ones: {sorted(map(str, rules ^ EXPECTED_TE_RULES))}")
+    return problems
+
+
+def selinux_fc_problems(fc):
+    """Return the problems with the file contexts: only the unit file, with its own type."""
+    lines = [line for line in fc.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    if len(lines) != 1:
+        return [f"{len(lines)} file contexts, not 1"]
+    match = re.fullmatch(r"(\S+)\s+--\s+gen_context\(system_u:object_r:(\w+),s0\)", lines[0])
+    if not match:
+        return ["the file context cannot be read"]
+    problems = []
+    if match.group(1) != SELINUX_UNIT_PATH:
+        problems.append(f"path {match.group(1)}")
+    if match.group(2) != SELINUX_UNIT_TYPE:
+        problems.append(f"type {match.group(2)}")
     return problems
 
 
@@ -956,12 +1011,16 @@ def read_selinux_files():
     return read("rpm/network-manager-gpclient.spec"), read("rpm/network-manager-gpclient.te")
 
 
-def test_spec_selinux_lines_are_only_for_fedora_and_rhel():
+def test_spec_selinux_lines_are_only_for_fedora_rhel_and_suse():
     spec, _ = read_selinux_files()
     assert selinux_spec_problems(spec) == []
     # The pieces the check finds: one of each in the right section
     lines = spec_conditions(spec)
     assert ("%postun", [SELINUX_GUARD], "    %selinux_modules_uninstall network-manager-gpclient") in lines
+    assert ("%post", [SELINUX_GUARD], "    /usr/sbin/restorecon %{_unitdir}/nm-gpclient.service >/dev/null 2>&1 || :") in lines
+
+
+RESTORECON = "/usr/sbin/restorecon %{_unitdir}/nm-gpclient.service >/dev/null 2>&1 || :"
 
 
 def make_selinux_spec(guard=SELINUX_GUARD, uninstall_check=True, unguarded=None):
@@ -976,14 +1035,15 @@ def make_selinux_spec(guard=SELINUX_GUARD, uninstall_check=True, unguarded=None)
     if uninstall_check:
         uninstall = f"{SELINUX_UNINSTALL_CHECK}\n    {uninstall}fi\n"
     return (
-        wrap("head", "BuildRequires:  selinux-policy-devel\n")
-        + wrap("head", "Requires:       selinux-policy-targeted\n")
+        wrap("head", "BuildRequires:  selinux-policy-devel\nBuildRequires:  findutils\n")
+        + "%if 0%{?suse_version}\nRequires:       (selinux-policy-targeted if selinux-policy)\n%else\n"
+        + f"%if {SELINUX_FEDORA_GUARD}\nRequires:       selinux-policy-targeted\n%endif\n%endif\n"
         + "%build\n"
         + wrap("%build", f"make -f /usr/share/selinux/devel/Makefile {SELINUX_NAME}.pp\n")
         + "%install\n"
         + wrap("%install", f"install -D -m 0644 {SELINUX_NAME}.pp %{{buildroot}}%{{_datadir}}/selinux/packages/{SELINUX_NAME}.pp\n")
         + "%post\n"
-        + wrap("%post", f"%selinux_modules_install %{{_datadir}}/selinux/packages/{SELINUX_NAME}.pp\n")
+        + wrap("%post", f"%selinux_modules_install %{{_datadir}}/selinux/packages/{SELINUX_NAME}.pp\n{RESTORECON}\n")
         + "%postun\n"
         + wrap("%postun", uninstall)
         + "%files\n"
@@ -1001,15 +1061,49 @@ def test_selinux_check_rejects_a_line_outside_the_guard(only_in):
     assert selinux_spec_problems(make_selinux_spec(unguarded=only_in))
 
 
-@pytest.mark.parametrize("guard", ["0%{?suse_version}", "0%{?fedora}", "0%{?rhel}", "1"])
+@pytest.mark.parametrize("guard", ["0%{?fedora}", "0%{?rhel}", "0%{?fedora} || 0%{?rhel}", "0%{?suse_version}", "1"])
 def test_selinux_check_rejects_another_condition(guard):
     assert selinux_spec_problems(make_selinux_spec(guard=guard))
 
 
 def test_selinux_check_rejects_the_else_branch_of_the_guard():
-    spec = make_selinux_spec().replace("%if 0%{?fedora} || 0%{?rhel}\nBuildRequires:  selinux-policy-devel\n",
-                                       "%if 0%{?fedora} || 0%{?rhel}\n%else\nBuildRequires:  selinux-policy-devel\n")
+    old = f"%if {SELINUX_GUARD}\nBuildRequires:  selinux-policy-devel\n"
+    spec = make_selinux_spec().replace(old, f"%if {SELINUX_GUARD}\n%else\nBuildRequires:  selinux-policy-devel\n")
+    assert old in make_selinux_spec()
     assert selinux_spec_problems(spec)
+
+
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        # a hard dependency on openSUSE, which can run AppArmor
+        ("Requires:       (selinux-policy-targeted if selinux-policy)", "Requires:       selinux-policy-targeted"),
+        # no dependency on Fedora and EL
+        ("Requires:       selinux-policy-targeted\n", ""),
+        # the findutils that the devel Makefile needs
+        ("BuildRequires:  findutils\n", ""),
+        # the unit file is not relabelled
+        (RESTORECON + "\n", ""),
+    ],
+)
+def test_selinux_check_rejects_a_changed_spec_line(old, new):
+    spec = make_selinux_spec()
+    assert old in spec
+    assert selinux_spec_problems(spec.replace(old, new, 1))
+
+
+def test_selinux_check_rejects_a_restorecon_before_the_module_install():
+    spec = make_selinux_spec()
+    install = f"%selinux_modules_install %{{_datadir}}/selinux/packages/{SELINUX_NAME}.pp\n"
+    assert install + RESTORECON + "\n" in spec
+    assert selinux_spec_problems(spec.replace(install + RESTORECON + "\n", RESTORECON + "\n" + install))
+
+
+def test_real_spec_rejected_with_a_hard_requires_on_opensuse():
+    spec = read("rpm/network-manager-gpclient.spec")
+    old = "Requires:       (selinux-policy-targeted if selinux-policy)"
+    assert old in spec
+    assert selinux_spec_problems(spec.replace(old, "Requires:       selinux-policy-targeted"))
 
 
 def test_selinux_check_rejects_an_uninstall_without_the_erase_check():
@@ -1064,7 +1158,7 @@ def test_selinux_name_check_rejects_a_mismatch_in_the_te_file(te, te_name):
 def test_selinux_te_allows_exactly_what_the_service_needs():
     _, te = read_selinux_files()
     assert selinux_te_problems(te) == []
-    assert re.findall(r"^allow NetworkManager_t ", te, re.M) == ["allow NetworkManager_t "] * 3
+    assert re.findall(r"^allow NetworkManager_t ", te, re.M) == ["allow NetworkManager_t "] * 4
 
 
 def good_te_rules():
@@ -1081,6 +1175,10 @@ def good_te_rules():
         "allow NetworkManager_t etc_t:file { read };",
         "allow NetworkManager_t session_dbusd_tmp_t:sock_file { write };",
         "allow NetworkManager_t self:capability { sys_admin };",
+        # every unit file, not the one of this package
+        "allow NetworkManager_t systemd_unit_file_t:service { start status };",
+        "allow NetworkManager_t *:service { start status };",
+        "allow NetworkManager_t nm_gpclient_unit_file_t:service { start status stop };",
     ],
 )
 def test_selinux_te_check_rejects_extra_access(extra):
@@ -1101,6 +1199,45 @@ def test_selinux_te_check_rejects_a_changed_rule(old, new):
     changed = te.replace(old, new)
     assert old in te
     assert selinux_te_problems(changed)
+
+
+@pytest.mark.parametrize("line", ["type nm_gpclient_unit_file_t;", "systemd_unit_file(nm_gpclient_unit_file_t)"])
+def test_selinux_te_check_rejects_a_missing_type_declaration(line):
+    te = good_te_rules()
+    assert line in te
+    assert selinux_te_problems(te.replace(line, ""))
+
+
+def test_selinux_te_rule_for_the_generic_unit_type_is_rejected_in_place_of_ours():
+    te = good_te_rules()
+    old = "allow NetworkManager_t nm_gpclient_unit_file_t:service"
+    assert old in te
+    assert selinux_te_problems(te.replace(old, "allow NetworkManager_t systemd_unit_file_t:service"))
+
+
+def test_selinux_file_contexts_label_only_the_unit_file():
+    fc = read("rpm/network-manager-gpclient.fc")
+    assert selinux_fc_problems(fc) == []
+    assert SELINUX_UNIT_PATH in fc and SELINUX_UNIT_TYPE in fc
+    assert os.path.isfile(os.path.join(RPM_DIR, "network-manager-gpclient.fc"))
+    # the same path as the spec installs the unit file to
+    spec = read("rpm/network-manager-gpclient.spec")
+    assert "%{_unitdir}/nm-gpclient.service" in spec
+
+
+@pytest.mark.parametrize(
+    "fc",
+    [
+        "",
+        "/usr/lib/systemd/system/other\\.service\t--\tgen_context(system_u:object_r:nm_gpclient_unit_file_t,s0)\n",
+        "/usr/lib/systemd/system/.*\t--\tgen_context(system_u:object_r:nm_gpclient_unit_file_t,s0)\n",
+        "/usr/lib/systemd/system/nm-gpclient\\.service\t--\tgen_context(system_u:object_r:systemd_unit_file_t,s0)\n",
+        "/usr/lib/systemd/system/nm-gpclient\\.service\t--\tgen_context(system_u:object_r:nm_gpclient_unit_file_t,s0)\n"
+        "/usr/bin/gpclient\t--\tgen_context(system_u:object_r:bin_t,s0)\n",
+    ],
+)
+def test_selinux_file_contexts_check_rejects_another_label(fc):
+    assert selinux_fc_problems(fc)
 
 
 def test_selinux_te_check_rejects_a_missing_rule():
