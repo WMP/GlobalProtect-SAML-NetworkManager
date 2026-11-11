@@ -848,7 +848,9 @@ def _read_as_user(name: str, path: str, uid: int) -> bytes:
     if result.returncode == 6 or len(result.stdout) > CERT_FILE_MAX_BYTES:
         raise ValueError(f"{name}: {path} is larger than {CERT_FILE_MAX_BYTES} bytes")
     if result.returncode != 0:
-        reason = result.stderr.decode(errors="replace").strip() or f"exit {result.returncode}"
+        # The last line only: an unexpected failure prints a whole traceback
+        lines = result.stderr.decode(errors="replace").strip().splitlines()
+        reason = lines[-1].strip() if lines else f"exit {result.returncode}"
         raise ValueError(f"{name}: cannot read the file: {reason}")
     return result.stdout
 

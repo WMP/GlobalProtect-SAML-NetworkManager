@@ -373,7 +373,9 @@ def test_private_connection_rejects_hip_script(
     plugin = _plugin(service_module, monkeypatch)
 
     with caplog.at_level("ERROR"):
-        with pytest.raises(Exception, match="not allowed in a private connection"):
+        with pytest.raises(
+            service_module.BadArgumentsError, match="not allowed in a private connection"
+        ):
             connect(
                 plugin,
                 _conn(

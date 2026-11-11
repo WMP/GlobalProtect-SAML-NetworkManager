@@ -35,9 +35,12 @@ CERT_PASS = "Cert#Pass2"
 DESKTOP_UID = pwd.getpwnam("nobody").pw_uid if os.getuid() == 0 else os.getuid()
 # Another user that exists (the file is "not owned" by the desktop user)
 OTHER_UID = (
-    next(p.pw_uid for p in pwd.getpwall() if p.pw_uid not in (0, DESKTOP_UID))
+    next((p.pw_uid for p in pwd.getpwall() if p.pw_uid not in (0, DESKTOP_UID)), None)
     if os.getuid() == 0
     else DESKTOP_UID + 1
+)
+needs_other_uid = pytest.mark.skipif(
+    OTHER_UID is None, reason="needs a second user besides root and nobody"
 )
 
 
@@ -424,7 +427,12 @@ def _big(tmp_path, uid):
         (lambda t, u: "/usr", 0, "not a regular file"),  # a directory
         (lambda t, u: "/dev/zero", 0, "not a regular file"),
         (_big, 0, "larger than"),
-        (lambda t, u: _own(_touch(t / "o.pem"), u), OTHER_UID - DESKTOP_UID, "not owned"),  # another owner
+        pytest.param(  # another owner
+            lambda t, u: _own(_touch(t / "o.pem"), u),
+            (OTHER_UID or DESKTOP_UID) - DESKTOP_UID,
+            "not owned",
+            marks=needs_other_uid,
+        ),
         (lambda t, u: str(t / "missing"), 0, "cannot read"),
     ],
 )
@@ -443,6 +451,7 @@ def _touch(path):
     return path
 
 
+@needs_other_uid
 def test_a_symlink_is_followed_and_the_target_is_checked(
     service_module, tmp_path, udir, me
 ):
@@ -522,6 +531,28 @@ def test_a_helper_that_hangs_is_a_read_failure(
         _copy(service_module, tmp_path, path, me)
 
 
+@pytest.mark.parametrize(
+    "code, stderr, reason",
+    [
+        (-9, b"", "exit -9"),  # killed by a signal, nothing on stderr
+        (1, b"Traceback (most recent call last):\n  ...\nMemoryError\n", "MemoryError"),
+    ],
+)
+def test_an_unknown_helper_failure_is_a_read_failure(
+    service_module, monkeypatch, tmp_path, udir, me, code, stderr, reason
+):
+    path = _own(_touch(Path(udir) / "x.pem"), me)
+    monkeypatch.setattr(
+        service_module.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, code, b"data", stderr),
+    )
+
+    with pytest.raises(ValueError, match=f"cannot read the file: {reason}$"):
+        _copy(service_module, tmp_path, path, me)
+    assert not os.listdir(tmp_path / "copies")
+
+
 def test_no_desktop_user_means_no_file_is_read(service_module, tmp_path, cert_files):
     # uid 0 is the fallback of _get_real_user when no session user is found
     with pytest.raises(ValueError, match="no desktop user"):
@@ -562,6 +593,7 @@ def test_a_bad_file_is_not_passed_to_gpclient(
     assert os.listdir(tmp_path / "run") == []  # no directory is left behind
 
 
+@needs_other_uid
 def test_the_desktop_uid_is_used_not_the_uid_of_the_service(
     service_module, monkeypatch, tmp_path, me, cert_files
 ):
