@@ -10,7 +10,8 @@ profile nm-gpclient-service /usr/lib/NetworkManager/nm-gpclient-service flags=(c
 
   # The script starts with "#!/usr/bin/env python3": env and the interpreter are
   # separate execs, and they stay under this profile (else the rules below never apply).
-  /usr/bin/env ix,
+  # AppArmor checks the resolved path: on Ubuntu 26.04 env is a link to Rust coreutils.
+  /usr/{bin,lib/cargo/bin/coreutils}/env ix,
   /usr/bin/python3* ix,
 
   # gpclient (root) stays under this profile. gpauth runs as the desktop user

@@ -16,6 +16,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 NAME = "usr.lib.NetworkManager.nm-gpclient-service"
 SERVICE = "/usr/lib/NetworkManager/nm-gpclient-service"
 CORE = "network-manager-gpclient"
+ENV_RULE = "  /usr/{bin,lib/cargo/bin/coreutils}/env ix,\n"
 
 
 def read(path):
@@ -54,7 +55,7 @@ def profile_problems(text, shebang=None):
     # the gpclient and gpauth rules never apply
     if shebang not in ("#!/usr/bin/env python3", "#!/usr/bin/python3"):
         problems.append(f"unknown shebang {shebang}")
-    if shebang == "#!/usr/bin/env python3" and not re.search(r"^\s*/usr/bin/env ix,$", text, re.M):
+    if shebang == "#!/usr/bin/env python3" and not re.search(r"^\s*/usr/\{bin,lib/cargo/bin/coreutils\}/env ix,$", text, re.M):
         problems.append("env does not stay under the profile (ix)")
     if not re.search(r"^\s*/usr/bin/python3\* ix,$", text, re.M):
         problems.append("the interpreter does not stay under the profile (ix)")
@@ -136,9 +137,11 @@ def test_the_profile_check_rejects_a_changed_profile(old, new):
 @pytest.mark.parametrize(
     "old, new",
     [
-        ("  /usr/bin/env ix,\n", ""),
-        ("  /usr/bin/env ix,\n", "  /usr/bin/env ux,\n"),
-        ("  /usr/bin/env ix,\n", "  /usr/bin/env px,\n"),
+        (ENV_RULE, ""),
+        (ENV_RULE, ENV_RULE.replace(" ix,", " ux,")),
+        (ENV_RULE, ENV_RULE.replace(" ix,", " px,")),
+        # Ubuntu 26.04: /usr/bin/env resolves to Rust coreutils, which AppArmor checks
+        (ENV_RULE, "  /usr/bin/env ix,\n"),
         ("  /usr/bin/python3* ix,\n", ""),
         ("  /usr/bin/python3* ix,\n", "  /usr/bin/python3* ux,\n"),
         ("  /usr/bin/python3* ix,\n", "  /usr/bin/python3* px,\n"),
@@ -152,7 +155,7 @@ def test_the_profile_check_rejects_an_env_or_interpreter_outside_the_profile(old
 
 def test_the_profile_check_follows_the_shebang_of_the_service():
     text = read("config/apparmor/" + NAME)
-    without_env = text.replace("  /usr/bin/env ix,\n", "")
+    without_env = text.replace(ENV_RULE, "")
     assert profile_problems(without_env, "#!/usr/bin/env python3")
     # a service that starts the interpreter directly needs no env rule, but a known shebang
     assert profile_problems(without_env, "#!/usr/bin/python3") == []
