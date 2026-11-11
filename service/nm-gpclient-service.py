@@ -791,47 +791,86 @@ def _cert_copy_root() -> str:
     return CERT_COPY_ROOT
 
 
+# Runs as the desktop user (python -I -S -c ...): opens the file once (links
+# followed, O_NONBLOCK so a FIFO does not block) and checks the open file.
+# argv: path, limit, uid. Exit: 0 data on stdout, 3 cannot open or read (reason
+# on stderr), 4 not a regular file, 5 wrong owner, 6 larger than the limit.
+_READ_AS_USER = """
+import os, stat, sys
+path, limit, uid = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+try:
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode):
+        sys.exit(4)
+    if info.st_uid != uid:
+        sys.exit(5)
+    data = b""
+    while len(data) <= limit:
+        chunk = os.read(fd, limit + 1 - len(data))
+        if not chunk:
+            break
+        data += chunk
+except OSError as e:
+    sys.stderr.write(e.strerror or str(e))
+    sys.exit(3)
+if len(data) > limit:
+    sys.exit(6)
+sys.stdout.buffer.write(data)
+"""
+
+
+def _read_as_user(name: str, path: str, uid: int) -> bytes:
+    """Content of the user's file, read by a helper that runs as `uid`"""
+    creds: Dict[str, Any] = {}
+    if os.geteuid() == 0:
+        import pwd
+
+        try:
+            pw = pwd.getpwuid(uid)
+        except KeyError as e:
+            raise ValueError(f"{name}: no user with uid {uid}, no file is read") from e
+        creds = dict(
+            user=uid, group=pw.pw_gid, extra_groups=os.getgrouplist(pw.pw_name, pw.pw_gid)
+        )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-I", "-S", "-c", _READ_AS_USER, path,
+             str(CERT_FILE_MAX_BYTES), str(uid)],
+            capture_output=True, timeout=5, env={}, cwd="/", **creds,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        raise ValueError(f"{name}: cannot read the file: {e}") from e
+    if result.returncode == 4:
+        raise ValueError(f"{name}: {path} is not a regular file")
+    if result.returncode == 5:
+        raise ValueError(f"{name}: {path} is not owned by the desktop user (uid {uid})")
+    if result.returncode == 6 or len(result.stdout) > CERT_FILE_MAX_BYTES:
+        raise ValueError(f"{name}: {path} is larger than {CERT_FILE_MAX_BYTES} bytes")
+    if result.returncode != 0:
+        reason = result.stderr.decode(errors="replace").strip() or f"exit {result.returncode}"
+        raise ValueError(f"{name}: cannot read the file: {reason}")
+    return result.stdout
+
+
 def copy_cert_file(name: str, path: str, uid: int, directory: str) -> str:
     """Copy the certificate or key file `path` into `directory`; return the copy.
 
     gpclient runs as root and reads the file again and again, so it gets a
     private copy and never the path of the user (no swap for a link to a root-only
     key, /dev/zero or a FIFO after the check). Guaranteed: the user's file is
-    opened once (O_NONBLOCK, so a FIFO does not block; links are followed) and
-    all checks are made on that open file: a regular file of the desktop user
-    `uid`, at most 1 MiB. The copy is in a root-owned directory the user cannot
-    write, owned by `uid` (gpauth runs as that user), mode 0400, with the
-    extension of the original: upstream reads .p12 and .pfx as PKCS#12, any other
-    as PEM. Not guaranteed: the content is the user's, gpclient checks it.
+    opened and read once by a short-lived helper that runs as the desktop user
+    `uid`, so root never opens a path the user cannot reach itself (O_NONBLOCK,
+    so a FIFO does not block; links are followed). All checks are made on that
+    open file: a regular file of `uid`, at most 1 MiB. Root only writes the copy:
+    in a root-owned directory the user cannot write, owned by `uid` (gpauth runs
+    as that user), mode 0400, with the extension of the original: upstream reads
+    .p12 and .pfx as PKCS#12, any other as PEM. Not guaranteed: the content is
+    the user's, gpclient checks it.
     """
     if uid == 0:
         raise ValueError(f"{name}: no desktop user was found, no file is read")
-    try:
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
-    except OSError as e:
-        raise ValueError(f"{name}: cannot read the file: {e.strerror or e}") from e
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode):
-            raise ValueError(f"{name}: {path} is not a regular file")
-        if info.st_uid != uid:
-            raise ValueError(
-                f"{name}: {path} is not owned by the desktop user (uid {uid})"
-            )
-        data = b""
-        while len(data) <= CERT_FILE_MAX_BYTES:
-            chunk = os.read(fd, CERT_FILE_MAX_BYTES + 1 - len(data))
-            if not chunk:
-                break
-            data += chunk
-        if len(data) > CERT_FILE_MAX_BYTES:
-            raise ValueError(
-                f"{name}: {path} is larger than {CERT_FILE_MAX_BYTES} bytes"
-            )
-    except OSError as e:
-        raise ValueError(f"{name}: cannot read the file: {e.strerror or e}") from e
-    finally:
-        os.close(fd)
+    data = _read_as_user(name, path, uid)
     ext = os.path.splitext(path)[1]
     copy = os.path.join(directory, name + (ext if re.fullmatch(r"\.\w{1,8}", ext) else ""))
     out = os.open(
@@ -1930,6 +1969,7 @@ class GpclientVPNPlugin(  # type: ignore[call-arg]  # sdbus metaclass keyword
         self.preferred_gateway = ""
         self._connection_uuid = ""
         self._permission_user = ""  # sole user of connection.permissions
+        self._private_connection = False  # connection.permissions has an entry
         self._gateway_list: List[str] = []  # discovered during this attempt
         self._stored_gateway_list = ""  # what the profile already has cached
         self._stored_gateway_count: Optional[int] = None  # gateway-list-count
@@ -2187,9 +2227,9 @@ class GpclientVPNPlugin(  # type: ignore[call-arg]  # sdbus metaclass keyword
                 uuid_raw[1] if isinstance(uuid_raw, tuple) else uuid_raw
             ) or ""
             # A connection limited to one user tells us the desktop user (#51)
-            self._permission_user = self._parse_permission_user(
-                connection_section.get("permissions", [])
-            )
+            permissions: Any = connection_section.get("permissions", [])
+            self._permission_user = self._parse_permission_user(permissions)
+            self._private_connection = self._is_private(permissions)
 
             # Get the server address (required). This is the portal address, or
             # a gateway address when as-gateway is set.
@@ -2295,6 +2335,17 @@ class GpclientVPNPlugin(  # type: ignore[call-arg]  # sdbus metaclass keyword
             hip_script_str = data_dict.get("hip-script", "").strip()
             if hip_script_str and not self.hip_enabled:
                 logger.info("hip-script is ignored because hip=false")
+            elif hip_script_str and self._private_connection:
+                # The owner of a private connection can change the script
+                # without admin rights, and the service runs it as root
+                message = (
+                    "hip-script is not allowed in a private connection "
+                    "(connection.permissions is set): the service runs it as root. "
+                    "Make the connection available to all users to use a custom "
+                    "HIP script."
+                )
+                logger.error(message)
+                raise BadArgumentsError(message)
             elif hip_script_str:
                 try:
                     self.hip_script = validate_hip_script(hip_script_str)
@@ -2567,6 +2618,7 @@ class GpclientVPNPlugin(  # type: ignore[call-arg]  # sdbus metaclass keyword
         self.preferred_gateway = ""
         self._connection_uuid = ""
         self._permission_user = ""
+        self._private_connection = False
         self._gateway_list = []
         self._stored_gateway_list = ""
         self._stored_gateway_count = None
@@ -2702,6 +2754,21 @@ class GpclientVPNPlugin(  # type: ignore[call-arg]  # sdbus metaclass keyword
             if len(parts) >= 2 and parts[0] == "user" and parts[1]:
                 users.add(parts[1])
         return users.pop() if len(users) == 1 else ""
+
+    @staticmethod
+    def _is_private(permissions: Any) -> bool:
+        """True when `connection.permissions` has any non-empty entry (fail
+        closed: NetworkManager's own test is a "user:" entry; a value of an
+        unknown shape counts as private when it is not empty)"""
+        if (
+            isinstance(permissions, tuple)
+            and len(permissions) == 2
+            and isinstance(permissions[1], (list, tuple))
+        ):
+            permissions = permissions[1]  # sdbus (signature, value)
+        if isinstance(permissions, (list, tuple)):
+            return any(bool(e) for e in permissions)
+        return bool(permissions)
 
     @staticmethod
     def _loginctl(*args: str) -> str:
@@ -2911,12 +2978,12 @@ class GpclientVPNPlugin(  # type: ignore[call-arg]  # sdbus metaclass keyword
                 try:
                     self._cert_dir = tempfile.mkdtemp(dir=_cert_copy_root())
                     os.chmod(self._cert_dir, 0o711)  # noqa: S103  # the desktop user must enter it (gpauth)
-                    usercert = copy_cert_file(
-                        "usercert", self.usercert, real_uid, self._cert_dir
+                    usercert = await asyncio.to_thread(
+                        copy_cert_file, "usercert", self.usercert, real_uid, self._cert_dir
                     )
                     if userkey:
-                        userkey = copy_cert_file(
-                            "userkey", self.userkey, real_uid, self._cert_dir
+                        userkey = await asyncio.to_thread(
+                            copy_cert_file, "userkey", self.userkey, real_uid, self._cert_dir
                         )
                 except (ValueError, OSError) as e:
                     logger.error(f"Rejected {e}")

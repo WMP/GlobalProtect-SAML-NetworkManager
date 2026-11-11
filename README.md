@@ -215,7 +215,7 @@ also be set with `nmcli connection modify "My VPN" +vpn.data key=value`:
 | `fix-openssl` | `auto` | Legacy TLS renegotiation for portals with an old TLS stack. `auto` retries once when the portal needs it and then stores `true` in the profile; `true` uses it from the start; `false` never does |
 | `mtu` | (empty) | MTU of the tunnel, 576-1500 (smaller values are raised to 576); empty or `0` is automatic. A value that is not a plain number up to 1500 is ignored with a warning in the log. openconnect uses it only when the gateway sends no MTU (its log then says "No MTU received. Calculated N ..."); a gateway MTU wins. Lowering it (`nmcli connection modify "My VPN" +vpn.data mtu=1300`) may help when the tunnel falls back from ESP to HTTPS with "ESP receive error: Message too long", as seen on mobile hotspots. The editors show a stored value they cannot show as 0 and keep it on save while the field is untouched |
 | `hip` | `true` | Send the HIP (Host Integrity Protection) report |
-| `hip-script` | (empty) | Absolute path to a custom HIP executable, passed as `--hip=<path>`; ignored when `hip=false`. The service runs it as root, so it must be a root-owned regular file, not group- or world-writable, in directories that are root-owned and not group- or world-writable; otherwise the connection fails (pick it under a root-owned directory such as `/usr/local/libexec`, not in your home). The editors have a file chooser icon in the field |
+| `hip-script` | (empty) | Absolute path to a custom HIP executable, passed as `--hip=<path>`; ignored when `hip=false`; not allowed in a private connection (`connection.permissions` is set): the activation fails. The service runs it as root, so it must be a root-owned regular file, not group- or world-writable, in directories that are root-owned and not group- or world-writable; otherwise the connection fails (pick it under a root-owned directory such as `/usr/local/libexec`, not in your home). The editors have a file chooser icon in the field |
 | `usercert` | (empty) | Absolute path to the client certificate, passed as `--certificate=<path>` (PEM or PKCS#12 `.p12`/`.pfx`). The file must be a regular file owned by your desktop user, at most 1 MiB (the service refuses others; it gives gpclient a private copy). The format comes from the extension: `.p12`/`.pfx` is PKCS#12, any other is PEM. The editors have a file chooser icon in the field. See [Client certificate](docs/INTERACTIVE_AUTH.md#client-certificate) |
 | `userkey` | (empty) | Absolute path to the private key (PEM), passed as `--sslkey=<path>`; ignored without `usercert`. Not needed when the key is in the certificate file. The editors have a file chooser icon in the field |
 | `cert-pass-flags` | `1` for a new connection from an editor, `0` otherwise | Where the `cert-pass` secret (the passphrase of an encrypted key or PKCS#12 file) is kept, like `password-flags`: `1` = for this user only, `0` = in the profile file, `2` = not saved. The service never puts the passphrase on the command line: it types it at gpclient's passphrase prompt, and only there. (Upstream gpclient itself passes it to gpauth on the command line in SAML mode: prefer an unencrypted key with mode `0600`.) The editors show it as the **Certificate passphrase** field |
@@ -285,6 +285,26 @@ history. Use `password-flags=1` and let `nmcli` ask for it:
 ```bash
 nmcli connection modify "My VPN" +vpn.data password-flags=1
 nmcli --ask connection up "My VPN"
+```
+
+### Private connections
+
+A private connection is one that only some users may use (`connection.permissions`
+is set). NetworkManager 1.58 and later needs support from the plugin for such a
+connection, and this plugin has it
+([#183](https://github.com/WMP/GlobalProtect-SAML-NetworkManager/issues/183)).
+
+- A custom HIP script (`hip-script`) is not allowed in a private connection: the
+  service runs it as root, and the owner of a private connection can change the
+  script without admin rights. Make the connection available to all users to use
+  a custom HIP script.
+- The certificate files (`usercert`, `userkey`) are read with the permissions of
+  the connection's user.
+
+To make a connection available to all users:
+
+```bash
+nmcli connection modify "My VPN" connection.permissions ""
 ```
 
 ### Import and export

@@ -342,3 +342,115 @@ def test_disconnect_resets_the_script(service_module, monkeypatch):
     asyncio.run(plugin.Disconnect())
 
     assert plugin.hip_script is None
+
+
+# --- private connections ------------------------------------------------------
+
+PRIVATE = [
+    ["user:alice:"],
+    ["user:alice"],
+    ("as", ["user:alice:"]),
+    ["user:alice:", "user:bob:"],
+    ["group:wheel"],  # unknown, but not empty: fail closed
+    ("user:alice:", "user:bob:"),  # a pair of entries, not (signature, value)
+    "user:alice:",  # not a list: fail closed
+]
+SHARED = [[], ("as", []), [""]]
+
+
+def _no_validation(service_module, monkeypatch):
+    def fail(path):
+        raise AssertionError("validate_hip_script must not be called")
+
+    monkeypatch.setattr(service_module, "validate_hip_script", fail)
+
+
+@pytest.mark.parametrize("permissions", PRIVATE)
+def test_private_connection_rejects_hip_script(
+    service_module, monkeypatch, dbus_signals, caplog, permissions
+):
+    _no_validation(service_module, monkeypatch)
+    plugin = _plugin(service_module, monkeypatch)
+
+    with caplog.at_level("ERROR"):
+        with pytest.raises(Exception, match="not allowed in a private connection"):
+            connect(
+                plugin,
+                _conn(
+                    data={"gateway": "g", "hip-script": "/opt/gp/hip.sh"},
+                    connection={"permissions": permissions},
+                ),
+            )
+
+    assert "not allowed in a private connection" in caplog.text
+    assert "start_gpclient" not in plugin.calls
+    assert plugin.hip_script is None
+
+
+@pytest.mark.parametrize("permissions", SHARED)
+def test_shared_connection_still_uses_hip_script(
+    service_module, monkeypatch, script, permissions
+):
+    real = service_module.validate_hip_script
+    monkeypatch.setattr(
+        service_module, "validate_hip_script", lambda p: real(p, trusted_uids=TRUSTED)
+    )
+    plugin = _plugin(service_module, monkeypatch)
+
+    connect(
+        plugin,
+        _conn(
+            data={"gateway": "g", "hip-script": str(script)},
+            connection={"permissions": permissions},
+        ),
+    )
+
+    assert plugin.hip_script == os.path.realpath(script)
+    assert "start_gpclient" in plugin.calls
+
+
+@pytest.mark.parametrize("permissions", PRIVATE)
+def test_private_connection_with_hip_off_ignores_hip_script(
+    service_module, monkeypatch, permissions
+):
+    _no_validation(service_module, monkeypatch)
+    plugin = _plugin(service_module, monkeypatch)
+
+    connect(
+        plugin,
+        _conn(
+            data={"gateway": "g", "hip": "false", "hip-script": "/opt/gp/hip.sh"},
+            connection={"permissions": permissions},
+        ),
+    )
+
+    assert plugin.hip_script is None
+    assert "start_gpclient" in plugin.calls
+
+
+@pytest.mark.parametrize("permissions", PRIVATE)
+def test_private_connection_without_hip_script_uses_bare_hip(
+    service_module, monkeypatch, permissions
+):
+    _no_validation(service_module, monkeypatch)
+    plugin = _plugin(service_module, monkeypatch)
+
+    connect(
+        plugin,
+        _conn(data={"gateway": "g"}, connection={"permissions": permissions}),
+    )
+
+    assert plugin.hip_enabled is True
+    assert plugin.hip_script is None
+    assert plugin._private_connection is True
+    assert "start_gpclient" in plugin.calls
+
+
+@pytest.mark.parametrize("permissions", SHARED)
+def test_shared_connection_is_not_private(service_module, monkeypatch, permissions):
+    plugin = _plugin(service_module, monkeypatch)
+    plugin._private_connection = True
+
+    connect(plugin, _conn(connection={"permissions": permissions}))
+
+    assert plugin._private_connection is False

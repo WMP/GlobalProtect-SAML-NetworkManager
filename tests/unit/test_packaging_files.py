@@ -117,3 +117,22 @@ def test_the_unit_does_not_set_options_that_break_the_process_tree(key):
 
 def test_the_unit_does_not_make_the_file_system_read_only():
     assert not re.search(r"^\s*ProtectSystem\s*=", UNIT, re.M)
+
+
+def _name_file_section(section):
+    import configparser
+
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.optionxform = str
+    parser.read_string(read("plugins/gnome/nm-gpclient-service.name"))
+    return parser[section]
+
+
+def test_the_name_file_declares_safe_private_file_access():
+    # NetworkManager 1.58+ refuses a private connection without it (#183)
+    assert _name_file_section("VPN Connection")["supports-safe-private-file-access"] == "true"
+
+
+def test_the_name_file_key_is_only_in_the_vpn_connection_section():
+    assert "supports-safe-private-file-access" not in _name_file_section("GNOME")
+    assert "supports-safe-private-file-access" not in _name_file_section("libnm")

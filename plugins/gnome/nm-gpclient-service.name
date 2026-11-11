@@ -2,6 +2,7 @@
 name=GlobalProtect
 service=org.freedesktop.NetworkManager.gpclient
 program=/usr/lib/NetworkManager/nm-gpclient-service
+supports-safe-private-file-access=true
 
 [libnm]
 plugin=libnm-vpn-plugin-gpclient.so
