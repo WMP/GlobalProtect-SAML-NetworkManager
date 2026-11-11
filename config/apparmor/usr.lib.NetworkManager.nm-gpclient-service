@@ -8,6 +8,11 @@ include <tunables/global>
 profile nm-gpclient-service /usr/lib/NetworkManager/nm-gpclient-service flags=(complain) {
   include <abstractions/base>
 
+  # The script starts with "#!/usr/bin/env python3": env and the interpreter are
+  # separate execs, and they stay under this profile (else the rules below never apply).
+  /usr/bin/env ix,
+  /usr/bin/python3* ix,
+
   # gpclient (root) stays under this profile. gpauth runs as the desktop user
   # and starts the browser: it runs unconfined, as without this profile, so
   # the browser keeps its own profile (for example Chrome's user namespaces on

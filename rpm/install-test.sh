@@ -110,6 +110,10 @@ case "${ID:-}" in
             [ "$attempt" -lt 5 ] || fail "zypper refresh failed $attempt times"
             sleep 30
         done
+        # The image has no SELinux policy: with it %post loads the module of the package,
+        # and the label of the unit file is checked below (Fedora and EL: a hard Requires)
+        "${install_cmd[@]}" selinux-policy-targeted policycoreutils \
+            || echo "Note: no SELinux policy can be installed in this image: the unit file label is not checked"
         ;;
     *)
         install_cmd=(dnf -y --setopt=install_weak_deps=False install)

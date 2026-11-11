@@ -27,8 +27,14 @@ def code(text):
     return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
 
 
-def profile_problems(text):
-    """The problems with an AppArmor profile text (an empty list: none)"""
+def shebang_of_the_service():
+    return read("service/nm-gpclient-service.py").splitlines()[0]
+
+
+def profile_problems(text, shebang=None):
+    """The problems with an AppArmor profile text (an empty list: none). `shebang` is the first
+    line of the service (the real one by default): with "env" the profile must keep env under it."""
+    shebang = shebang or shebang_of_the_service()
     text = code(text)
     problems = []
     head = re.search(r"^profile\s+(\S+)\s+(\S+)\s+flags=\(([^)]*)\)\s*\{", text, re.M)
@@ -44,6 +50,14 @@ def profile_problems(text):
         problems.append("enforce")
     if not re.search(r"^\s*/usr/bin/gpauth ux,$", text, re.M):
         problems.append("gpauth does not run unconfined (ux)")
+    # env and the interpreter are separate execs: without ix they leave the profile, and
+    # the gpclient and gpauth rules never apply
+    if shebang not in ("#!/usr/bin/env python3", "#!/usr/bin/python3"):
+        problems.append(f"unknown shebang {shebang}")
+    if shebang == "#!/usr/bin/env python3" and not re.search(r"^\s*/usr/bin/env ix,$", text, re.M):
+        problems.append("env does not stay under the profile (ix)")
+    if not re.search(r"^\s*/usr/bin/python3\* ix,$", text, re.M):
+        problems.append("the interpreter does not stay under the profile (ix)")
     return problems
 
 
@@ -51,11 +65,52 @@ def test_the_profile_is_in_complain_mode_and_attached_to_the_service():
     assert profile_problems(read("config/apparmor/" + NAME)) == []
 
 
-def test_the_profile_path_is_where_every_package_installs_the_service():
-    # debian/rules and the PKGBUILD name it in full; the spec as %{_prefix}/lib/...
-    for path in ("debian/rules", "arch/PKGBUILD", "rpm/network-manager-gpclient.spec"):
-        assert "lib/NetworkManager/nm-gpclient-service\n" in read(path) or "lib/NetworkManager/nm-gpclient-service \\" in read(path), path
+# The exact lines that install the service, by file: the source, then the destination
+INSTALL_LINES = {
+    "debian/rules": r"install -D -m 755 service/nm-gpclient-service\.py \\\n\s+\$\(CURDIR\)/debian/network-manager-gpclient%s\n",
+    "arch/PKGBUILD": r"install -D -m 0755 service/nm-gpclient-service\.py \\\n\s+\"\$pkgdir%s\"\n",
+    "rpm/network-manager-gpclient.spec": r"install -D -m 0755 service/nm-gpclient-service\.py \\\n\s+%%\{buildroot\}%%\{_prefix\}%s\n",
+}
+
+
+def install_path_problems(name, text):
+    """The problems with where a packaging file installs the service: the exact destination"""
+    dest = SERVICE if name != "rpm/network-manager-gpclient.spec" else SERVICE[len("/usr"):]
+    if re.search(INSTALL_LINES[name] % re.escape(dest), text):
+        return []
+    return [f"{name} does not install the service to {SERVICE}"]
+
+
+@pytest.mark.parametrize("name", sorted(INSTALL_LINES))
+def test_the_profile_path_is_where_every_package_installs_the_service(name):
+    assert install_path_problems(name, read(name)) == []
     assert SERVICE in read("config/apparmor/" + NAME)
+
+
+@pytest.mark.parametrize("name", sorted(INSTALL_LINES))
+@pytest.mark.parametrize(
+    "new",
+    [
+        "/libexec/gpclient/nm-gpclient-service",
+        "/NetworkManager/nm-gpclient-service.py",
+        "/NetworkManager/nm-gpclient-service-old",
+        "/NetworkManager/gpclient-nm-service",
+    ],
+)
+def test_the_install_path_check_rejects_another_destination(name, new):
+    text = read(name)
+    dest = SERVICE if name != "rpm/network-manager-gpclient.spec" else SERVICE[len("/usr"):]
+    match = re.search(INSTALL_LINES[name] % re.escape(dest), text)
+    assert match
+    # only the destination changes (the source name has no "/NetworkManager/" in it)
+    assert install_path_problems(name, text.replace(match.group(0), match.group(0).replace("/NetworkManager/nm-gpclient-service", new)))
+
+
+@pytest.mark.parametrize("name", sorted(INSTALL_LINES))
+def test_the_install_path_check_ignores_a_line_that_only_ends_with_the_path(name):
+    # another file installed to the same place is not the service
+    changed = read(name).replace("service/nm-gpclient-service.py", "service/other.py")
+    assert install_path_problems(name, changed)
 
 
 @pytest.mark.parametrize(
@@ -76,6 +131,33 @@ def test_the_profile_check_rejects_a_changed_profile(old, new):
     text = read("config/apparmor/" + NAME)
     assert old in text
     assert profile_problems(text.replace(old, new))
+
+
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        ("  /usr/bin/env ix,\n", ""),
+        ("  /usr/bin/env ix,\n", "  /usr/bin/env ux,\n"),
+        ("  /usr/bin/env ix,\n", "  /usr/bin/env px,\n"),
+        ("  /usr/bin/python3* ix,\n", ""),
+        ("  /usr/bin/python3* ix,\n", "  /usr/bin/python3* ux,\n"),
+        ("  /usr/bin/python3* ix,\n", "  /usr/bin/python3* px,\n"),
+    ],
+)
+def test_the_profile_check_rejects_an_env_or_interpreter_outside_the_profile(old, new):
+    text = read("config/apparmor/" + NAME)
+    assert old in text
+    assert profile_problems(text.replace(old, new), "#!/usr/bin/env python3")
+
+
+def test_the_profile_check_follows_the_shebang_of_the_service():
+    text = read("config/apparmor/" + NAME)
+    without_env = text.replace("  /usr/bin/env ix,\n", "")
+    assert profile_problems(without_env, "#!/usr/bin/env python3")
+    # a service that starts the interpreter directly needs no env rule, but a known shebang
+    assert profile_problems(without_env, "#!/usr/bin/python3") == []
+    assert profile_problems(text, "#!/bin/sh")
+    assert shebang_of_the_service() in ("#!/usr/bin/env python3", "#!/usr/bin/python3")
 
 
 def test_the_profile_check_rejects_a_text_that_is_no_profile():

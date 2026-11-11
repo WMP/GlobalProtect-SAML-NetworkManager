@@ -154,9 +154,10 @@ and `.fc`). NetworkManager starts the program of the plugin in the domain
 `NetworkManager_t`; the program hands over to `nm-gpclient.service` with
 `systemctl start`. The module allows this and nothing else for the unit:
 
-- The unit file has its own type, `nm_gpclient_unit_file_t`. `%post` relabels it
-  with `restorecon`. NetworkManager may `start` and get the `status` of this unit
-  only, not of every unit file.
+- The unit file has its own type, `nm_gpclient_unit_file_t`. The RPM relabels
+  it with `%selinux_relabel_pre` (`%pre`) and `%selinux_relabel_post`
+  (`%posttrans`), which also work in transactional updates. NetworkManager may
+  `start` and get the `status` of this unit only, not of every unit file.
 - The service needs its PTY (`ptmx`/`devpts`) and must inspect the desktop
   session bus socket while it starts SAML authentication. This applies when it
   runs in `NetworkManager_t`.

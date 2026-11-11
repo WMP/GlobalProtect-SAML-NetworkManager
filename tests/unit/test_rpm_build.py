@@ -783,13 +783,58 @@ def test_spec_neither_builds_nor_installs_nor_packages_gpservice():
     assert "gpservice" not in read("arch/PKGBUILD")
 
 
-def test_install_test_checks_the_label_of_the_unit_file_and_skips_without_a_policy():
-    text = read("rpm/install-test.sh")
-    assert "matchpathcon /usr/lib/systemd/system/nm-gpclient.service" in text
-    assert "nm_gpclient_unit_file_t" in text
+def install_test_label_problems(text):
+    """The problems with the check of the unit file label in install-test.sh"""
+    problems = []
+    if not re.search(r'^\s+context=\$\(matchpathcon /usr/lib/systemd/system/nm-gpclient\.service\)', text, re.M):
+        problems.append("no matchpathcon of the unit file")
+    if not re.search(r"grep -q ':nm_gpclient_unit_file_t:' <<<\"\$context\"", text):
+        problems.append("the type nm_gpclient_unit_file_t is not checked")
     # an image without /etc/selinux/config or matchpathcon is not a failure
-    assert '[ -e /etc/selinux/config ] && command -v matchpathcon' in text
-    assert "is not checked" in text
+    if "if [ -e /etc/selinux/config ] && command -v matchpathcon >/dev/null 2>&1; then" not in text:
+        problems.append("no skip without a policy or matchpathcon")
+    if "is not checked" not in text.split("else", 1)[-1]:
+        problems.append("no note when the check is skipped")
+    # openSUSE: the policy is installed before the packages, so that %post loads the module
+    suse = re.search(r"opensuse-\* \| sles\)(.*?)\n        ;;\n", text, re.S)
+    policy = r'"\$\{install_cmd\[@\]\}" selinux-policy-targeted policycoreutils'
+    if not suse or not re.search(policy, suse.group(1)):
+        problems.append("openSUSE does not install the SELinux policy")
+    first = text.find("selinux-policy-targeted policycoreutils")
+    if first < 0 or first > text.index('"${install_cmd[@]}" "${files[@]}"'):
+        problems.append("the policy is not installed before the packages")
+    return problems
+
+
+def test_install_test_checks_the_label_of_the_unit_file_and_installs_the_policy_on_opensuse():
+    assert install_test_label_problems(read("rpm/install-test.sh")) == []
+
+
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        ("matchpathcon /usr/lib/systemd/system/nm-gpclient.service", "matchpathcon /usr/lib/systemd/system/other.service"),
+        ("':nm_gpclient_unit_file_t:'", "':systemd_unit_file_t:'"),
+        ("':nm_gpclient_unit_file_t:'", "':NetworkManager_t:'"),
+        (" && command -v matchpathcon >/dev/null 2>&1", ""),
+        ("[ -e /etc/selinux/config ] && ", ""),
+        ('    echo "Note: no SELinux policy or no matchpathcon in this image: the unit file label is not checked"\n', "    :\n"),
+        ('"${install_cmd[@]}" selinux-policy-targeted policycoreutils', '"${install_cmd[@]}" policycoreutils'),
+        ('"${install_cmd[@]}" selinux-policy-targeted policycoreutils', "dnf -y install selinux-policy-targeted policycoreutils"),
+    ],
+)
+def test_the_install_test_label_check_rejects_a_change(old, new):
+    text = read("rpm/install-test.sh")
+    assert old in text
+    assert install_test_label_problems(text.replace(old, new))
+
+
+def test_the_install_test_label_check_rejects_a_policy_installed_after_the_packages():
+    text = read("rpm/install-test.sh")
+    block = re.search(r"        # The image has no SELinux policy.*?label is not checked\"\n", text, re.S).group(0)
+    moved = text.replace(block, "").replace('"${install_cmd[@]}" "${files[@]}"', block.strip() + '\n"${install_cmd[@]}" "${files[@]}"')
+    assert moved != text
+    assert install_test_label_problems(moved)
 
 
 def provides_exclude_pattern():
@@ -877,7 +922,7 @@ def spec_conditions(spec):
         elif word == "%endif":
             stack.pop()
         else:
-            if word in ("%build", "%install", "%post", "%postun", "%files", "%prep", "%description", "%changelog"):
+            if word in ("%build", "%install", "%pre", "%post", "%postun", "%posttrans", "%files", "%prep", "%description", "%changelog"):
                 section = word
             result.append((section, list(stack), line))
     assert not stack, "unbalanced %if in the spec"
@@ -894,7 +939,8 @@ def selinux_spec_problems(spec):
         r"^make -f /usr/share/selinux/devel/Makefile ": "%build",
         r"%\{buildroot\}%\{_datadir\}/selinux/packages/": "%install",
         r"^%selinux_modules_install ": "%post",
-        r"^\s*/usr/sbin/restorecon %\{_unitdir\}/nm-gpclient\.service ": "%post",
+        r"^%selinux_relabel_pre$": "%pre",
+        r"^%selinux_relabel_post$": "%posttrans",
         r"^\s*%selinux_modules_uninstall ": "%postun",
         r"^%\{_datadir\}/selinux/packages/": "%files",
     }
@@ -907,13 +953,6 @@ def selinux_spec_problems(spec):
                 problems.append(f"{text} is in {sec or 'the header'}, not in {section}")
             if stack != [SELINUX_GUARD]:
                 problems.append(f"{text} is under {stack}, not under {SELINUX_GUARD}")
-    # The unit file gets its type after the module is installed
-    order = [
-        next((i for i, (_s, _k, line) in enumerate(lines) if re.search(text, line)), None)
-        for text in (r"^%selinux_modules_install ", r"^\s*/usr/sbin/restorecon ")
-    ]
-    if None in order or order[0] > order[1]:
-        problems.append("restorecon is not after selinux_modules_install")
     # Fedora and EL require the policy; openSUSE (AppArmor is still an install option there)
     # only when SELinux is installed: a rich dependency, not a hard one
     requires = {
@@ -1017,10 +1056,8 @@ def test_spec_selinux_lines_are_only_for_fedora_rhel_and_suse():
     # The pieces the check finds: one of each in the right section
     lines = spec_conditions(spec)
     assert ("%postun", [SELINUX_GUARD], "    %selinux_modules_uninstall network-manager-gpclient") in lines
-    assert ("%post", [SELINUX_GUARD], "    /usr/sbin/restorecon %{_unitdir}/nm-gpclient.service >/dev/null 2>&1 || :") in lines
-
-
-RESTORECON = "/usr/sbin/restorecon %{_unitdir}/nm-gpclient.service >/dev/null 2>&1 || :"
+    assert ("%pre", [SELINUX_GUARD], "%selinux_relabel_pre") in lines
+    assert ("%posttrans", [SELINUX_GUARD], "%selinux_relabel_post") in lines
 
 
 def make_selinux_spec(guard=SELINUX_GUARD, uninstall_check=True, unguarded=None):
@@ -1042,10 +1079,14 @@ def make_selinux_spec(guard=SELINUX_GUARD, uninstall_check=True, unguarded=None)
         + wrap("%build", f"make -f /usr/share/selinux/devel/Makefile {SELINUX_NAME}.pp\n")
         + "%install\n"
         + wrap("%install", f"install -D -m 0644 {SELINUX_NAME}.pp %{{buildroot}}%{{_datadir}}/selinux/packages/{SELINUX_NAME}.pp\n")
+        + "%pre\n"
+        + wrap("%pre", "%selinux_relabel_pre\n")
         + "%post\n"
-        + wrap("%post", f"%selinux_modules_install %{{_datadir}}/selinux/packages/{SELINUX_NAME}.pp\n{RESTORECON}\n")
+        + wrap("%post", f"%selinux_modules_install %{{_datadir}}/selinux/packages/{SELINUX_NAME}.pp\n")
         + "%postun\n"
         + wrap("%postun", uninstall)
+        + "%posttrans\n"
+        + wrap("%posttrans", "%selinux_relabel_post\n")
         + "%files\n"
         + wrap("%files", f"%{{_datadir}}/selinux/packages/{SELINUX_NAME}.pp\n")
     )
@@ -1055,7 +1096,7 @@ def test_selinux_check_accepts_a_good_synthetic_spec():
     assert selinux_spec_problems(make_selinux_spec()) == []
 
 
-@pytest.mark.parametrize("only_in", ["head", "%build", "%install", "%post", "%postun", "%files"])
+@pytest.mark.parametrize("only_in", ["head", "%build", "%install", "%pre", "%post", "%postun", "%posttrans", "%files"])
 def test_selinux_check_rejects_a_line_outside_the_guard(only_in):
     # The guard is missing in one place only: the check must find it
     assert selinux_spec_problems(make_selinux_spec(unguarded=only_in))
@@ -1083,7 +1124,8 @@ def test_selinux_check_rejects_the_else_branch_of_the_guard():
         # the findutils that the devel Makefile needs
         ("BuildRequires:  findutils\n", ""),
         # the unit file is not relabelled
-        (RESTORECON + "\n", ""),
+        ("%selinux_relabel_pre\n", ""),
+        ("%selinux_relabel_post\n", ""),
     ],
 )
 def test_selinux_check_rejects_a_changed_spec_line(old, new):
@@ -1092,11 +1134,14 @@ def test_selinux_check_rejects_a_changed_spec_line(old, new):
     assert selinux_spec_problems(spec.replace(old, new, 1))
 
 
-def test_selinux_check_rejects_a_restorecon_before_the_module_install():
+@pytest.mark.parametrize("macro", ["%selinux_relabel_post", "%selinux_relabel_pre"])
+def test_selinux_check_rejects_a_relabel_macro_in_the_wrong_section(macro):
     spec = make_selinux_spec()
-    install = f"%selinux_modules_install %{{_datadir}}/selinux/packages/{SELINUX_NAME}.pp\n"
-    assert install + RESTORECON + "\n" in spec
-    assert selinux_spec_problems(spec.replace(install + RESTORECON + "\n", RESTORECON + "\n" + install))
+    assert macro + "\n" in spec
+    install = f"/packages/{SELINUX_NAME}.pp\n%endif\n%postun"
+    assert install in spec
+    moved = spec.replace(macro + "\n", "").replace(install, f"/packages/{SELINUX_NAME}.pp\n{macro}\n%endif\n%postun", 1)
+    assert selinux_spec_problems(moved)
 
 
 def test_real_spec_rejected_with_a_hard_requires_on_opensuse():

@@ -293,13 +293,16 @@ PYTHONPATH=%{buildroot}%{python3_sitearch} /usr/bin/python3 -c 'import sdbus'
 # The Plasma widget tests, as debian/rules runs them
 (cd plugins/plasma/build && ctest --output-on-failure --no-tests=error)
 
+%pre
+%if 0%{?fedora} || 0%{?rhel} || 0%{?suse_version}
+# With %selinux_relabel_post: the unit file gets its own type (network-manager-gpclient.fc),
+# so that NetworkManager may start it (#183); the macros also work in transactional updates
+%selinux_relabel_pre
+%endif
+
 %post
 %if 0%{?fedora} || 0%{?rhel} || 0%{?suse_version}
 %selinux_modules_install %{_datadir}/selinux/packages/network-manager-gpclient.pp
-# Give the unit file its own type (network-manager-gpclient.fc), so that NetworkManager may start it (#183)
-if /usr/sbin/selinuxenabled 2>/dev/null; then
-    /usr/sbin/restorecon %{_unitdir}/nm-gpclient.service >/dev/null 2>&1 || :
-fi
 %endif
 %systemd_post nm-gpclient.service
 # Reload the D-Bus configuration to pick up the new service files
@@ -332,6 +335,11 @@ if [ "$1" -eq 0 ]; then
             /org/freedesktop/DBus org.freedesktop.DBus.ReloadConfig >/dev/null 2>&1 || :
     fi
 fi
+
+%posttrans
+%if 0%{?fedora} || 0%{?rhel} || 0%{?suse_version}
+%selinux_relabel_post
+%endif
 
 %files -f NetworkManager-gpclient.lang
 %license LICENSE
