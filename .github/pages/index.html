@@ -93,10 +93,10 @@ sudo dnf install network-manager-gpclient-gnome    # or network-manager-gpclient
 # AlmaLinux, Rocky Linux, RHEL 10: EPEL and CRB are needed for the dependencies
 sudo dnf install epel-release &amp;&amp; sudo /usr/bin/crb enable
 sudo curl -fsSL -o /etc/yum.repos.d/network-manager-gpclient.repo \
-  __REPO_URL__/rpm/el10/network-manager-gpclient.repo
+  __REPO_URL__/rpm/el$(rpm -E %rhel)/network-manager-gpclient.repo
 sudo dnf install network-manager-gpclient-gnome
 
-# openSUSE Leap 16.0 (leap16.0), Leap 16.1 (leap16.1) or Tumbleweed (tumbleweed)
+# openSUSE Tumbleweed (on Leap 16.0 or 16.1, replace tumbleweed with leap16.0 or leap16.1)
 sudo zypper addrepo __REPO_URL__/rpm/tumbleweed/network-manager-gpclient.repo
 sudo zypper refresh
 sudo zypper install network-manager-gpclient-gnome</code></pre>
