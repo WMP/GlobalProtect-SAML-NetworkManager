@@ -58,7 +58,7 @@ with `subscription-manager` instead of `crb`, and install `epel-release` as the
 ```bash
 sudo dnf install epel-release
 sudo dnf config-manager --set-enabled crb
-sudo dnf config-manager --add-repo https://wmp.github.io/GlobalProtect-SAML-NetworkManager/rpm/el10/network-manager-gpclient.repo
+sudo dnf config-manager --add-repo https://wmp.github.io/GlobalProtect-SAML-NetworkManager/rpm/el$(rpm -E %rhel)/network-manager-gpclient.repo
 sudo dnf install network-manager-gpclient-gnome    # or network-manager-gpclient-plasma
 ```
 
