@@ -43,7 +43,7 @@ if [ -n "${PROJECT_VERSION:-}" ]; then
   # The first is made by arch/build.sh from the working tree
   sha256sums=(SKIP "$_sdbus_sha256")
 else
-  pkgver=2.0.0
+  pkgver=2.0.1
   pkgrel=1
   _sdbus_version=0.14.3
   _sdbus_sha256=4ec4fa4108629bae5ab2775e5575b0251fdb555d4a3613c9ddb37fc73f882983

@@ -174,8 +174,12 @@ def test_user_mode_values_equal_the_changelog_rpm_sources_gitmodules_and_gitlink
     assert problems == []
 
 
+# the version of the top debian/changelog entry, so the drift test needs no change per release
+TOP_VERSION = re.match(r"\S+ \(([^)]+)\)", read("debian/changelog")).group(1)
+
+
 @pytest.mark.parametrize("old, new, expected", [
-    ("pkgver=2.0.0", "pkgver=1.9.9", "pkgver"),
+    ("pkgver=" + TOP_VERSION + "\n", "pkgver=1.9.9\n", "pkgver"),
     ("_sdbus_version=0.14.3", "_sdbus_version=0.14.2", "sdbus version"),
     ("_sdbus_sha256=4ec4", "_sdbus_sha256=0000", "sdbus sha256"),
     ("#commit=915c130c", "#commit=015c130c", "GlobalProtect-openconnect is not pinned"),

@@ -1,3 +1,20 @@
+network-manager-gpclient (2.0.1) unstable; urgency=medium
+
+  * Private connections (available to one user only) work with
+    NetworkManager 1.58 and later. A private connection cannot use a custom
+    HIP script (hip-script): the activation fails with a clear message. The
+    default HIP report still works (#183)
+  * SELinux (Fedora, EL and openSUSE): NetworkManager may start
+    nm-gpclient.service, and no other unit, so the service runs in its own
+    unit and not in NetworkManager's domain. The SELinux module is now also
+    installed on openSUSE (#183)
+  * AppArmor (Ubuntu and Arch Linux): new profile of the service in complain
+    mode. It blocks nothing and logs the accesses that its rules do not
+    allow (#183). It has the flag attach_disconnected, so the service starts
+    (#188)
+
+ -- WMP <example@example.org>  Fri, 13 Nov 2026 12:00:00 +0000
+
 network-manager-gpclient (2.0.0) unstable; urgency=medium
 
   * RPM packages for Fedora 43, 44 and 45, RHEL/AlmaLinux/Rocky 10 and
