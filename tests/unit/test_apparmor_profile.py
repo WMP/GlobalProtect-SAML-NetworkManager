@@ -44,8 +44,9 @@ def profile_problems(text, shebang=None):
         return ["no profile line with flags"]
     if head.group(2) != SERVICE:
         problems.append(f"attached to {head.group(2)}, not {SERVICE}")
-    if head.group(3).split(",") != ["complain"]:
-        problems.append(f"flags {head.group(3)}, not complain")
+    # attach_disconnected: without it a disconnected path fails even in complain mode (#188)
+    if head.group(3).split(",") != ["complain", "attach_disconnected"]:
+        problems.append(f"flags {head.group(3)}, not complain,attach_disconnected")
     if re.search(r"^\s*(audit\s+)?deny\b", text, re.M):
         problems.append("a deny rule")
     if "enforce" in text:
@@ -121,9 +122,12 @@ def test_the_install_path_check_ignores_a_line_that_only_ends_with_the_path(name
 @pytest.mark.parametrize(
     "old, new",
     [
-        ("flags=(complain)", "flags=(enforce)"),
-        ("flags=(complain)", "flags=(complain,enforce)"),
-        ("flags=(complain)", "flags=(attach_disconnected)"),
+        ("flags=(complain,attach_disconnected)", "flags=(enforce)"),
+        ("flags=(complain,attach_disconnected)", "flags=(complain,enforce)"),
+        ("flags=(complain,attach_disconnected)", "flags=(attach_disconnected)"),
+        ("flags=(complain,attach_disconnected)", "flags=(complain)"),
+        ("flags=(complain,attach_disconnected)", "flags=(complain,attach-disconnected)"),
+        ("flags=(complain,attach_disconnected)", "flags=(enforce,attach_disconnected)"),
         ("profile nm-gpclient-service /usr/lib/NetworkManager/nm-gpclient-service", "profile nm-gpclient-service /usr/libexec/gpclient/nm-gpclient-service"),
         ("  /usr/bin/gpauth ux,\n", "  /usr/bin/gpauth Ux,\n"),
         ("  /usr/bin/gpauth ux,\n", "  /usr/bin/gpauth ix,\n"),

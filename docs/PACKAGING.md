@@ -182,6 +182,19 @@ that the browser keeps its own profile. To add local rules, use
 package loads the profile with `dh_apparmor`; on Arch Linux the install script
 loads it when AppArmor is active, and `apparmor` is an optional dependency.
 
+The profile has the flag `attach_disconnected`. The service runs in the mount
+namespace of NetworkManager, and AppArmor cannot resolve a path outside it (a
+"disconnected" path). Without the flag such a lookup fails also in complain
+mode, and the service does not start (#188).
+
+A downgrade to a version without the profile keeps the profile file and the
+loaded profile. To remove them:
+
+```bash
+sudo apparmor_parser -R /etc/apparmor.d/usr.lib.NetworkManager.nm-gpclient-service
+sudo rm /etc/apparmor.d/usr.lib.NetworkManager.nm-gpclient-service
+```
+
 ### Version in `debian/changelog`
 
 The package is native (`debian/source/format` is `3.0 (native)`), so a new entry has the
