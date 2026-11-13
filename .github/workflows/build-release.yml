@@ -743,7 +743,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: .github/scripts
+          sparse-checkout: |
+            .github/scripts
+            debian
           sparse-checkout-cone-mode: true
 
       - name: Add downloads table to the release notes
@@ -752,10 +754,11 @@ jobs:
           REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
-          # Merged between markers: a rerun replaces only the table and keeps the
-          # generated notes and the edits made before this job runs.
+          # Merged between markers: a rerun replaces only the changes (top entry of
+          # debian/changelog) and the table, and keeps the generated notes and the
+          # edits made before this job runs.
           gh release view "$TAG" --repo "$REPO" --json assets,body > release.json
-          python3 .github/scripts/release_notes.py --repo "$REPO" --tag "$TAG" --release-json release.json > new-body.md
+          python3 .github/scripts/release_notes.py --repo "$REPO" --tag "$TAG" --release-json release.json --changelog debian/changelog > new-body.md
           gh release edit "$TAG" --repo "$REPO" --notes-file new-body.md
 
   publish-apt:
