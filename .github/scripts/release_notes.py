@@ -1,7 +1,12 @@
-"""The release notes' table of download links, as markdown.
+"""The release notes' list of changes and table of download links, as markdown.
 
     gh release view v1.4.2 --json assets,body > release.json
-    release_notes.py --repo OWNER/REPO --tag v1.4.2 --release-json release.json > new-body.md
+    release_notes.py --repo OWNER/REPO --tag v1.4.2 --release-json release.json \\
+        --changelog debian/changelog > new-body.md
+
+The changes are the bullets of the top entry of debian/changelog, as markdown. Its
+version must be the tag without the leading "v". They come first, in a block
+between the markers <!-- changes:start --> and <!-- changes:end -->.
 
 Used by .github/workflows/build-release.yml. The release has one .deb per package,
 Ubuntu release and architecture, so the notes start with a table: a row per
@@ -10,10 +15,11 @@ cell. Its binary .rpm files (one per package, RPM target of rpm/targets and
 architecture) get a second table in the same form, a row per target and a column
 per RPM architecture; source RPMs are not listed. The Arch Linux packages
 (.pkg.tar.zst, x86_64 only) get a third table with one row. The links are those of the assets the release has and has finished
-uploading. The table is wrapped in markers and merged into the body of the
-release (GitHub's generated notes): it replaces the block between the markers,
-or, with no block yet, goes to the top. The rest of the body is kept byte for
-byte, so a rerun changes nothing. Standard library only.
+uploading. The table is wrapped in markers too. Both blocks are merged into the body
+of the release (GitHub's generated notes): each replaces the block between its
+markers, or, with no block yet, the changes go to the top and the table right
+after them. The rest of the body is kept byte for byte, so a rerun changes
+nothing. Standard library only.
 """
 
 import argparse
@@ -27,6 +33,9 @@ REPO_RE = re.compile(r"[\w.-]+/[\w.-]+", re.ASCII)
 URL_RE = re.compile(r"[A-Za-z0-9._~%+/:-]+")
 START = "<!-- downloads:start -->"
 END = "<!-- downloads:end -->"
+CHANGES_START = "<!-- changes:start -->"
+CHANGES_END = "<!-- changes:end -->"
+HEADER_RE = re.compile(r"[a-z0-9][a-z0-9+.-]* \((?P<version>[^()\s]+)\) [^;]+; urgency=.*")
 # <package>_<version>.<codename>1_<arch>.deb; GitHub turns the "~" of a release version
 # (1.4.2-1~noble1) into "." in the name of an asset: accept either
 NAME_RE = re.compile(
@@ -273,27 +282,62 @@ def arch_table(repo, blob, pkgs):
     ]
 
 
-def find_block(text, what):
-    """(start, end) offsets of the one marked block of `text`, or None if it has none"""
-    starts = [m.start() for m in re.finditer(re.escape(START), text)]
-    ends = [m.start() for m in re.finditer(re.escape(END), text)]
+def changes_block(tag, changelog):
+    """The marked block of markdown for the top entry of the text of a debian/changelog"""
+    lines = changelog.splitlines()
+    header = HEADER_RE.fullmatch(lines[0]) if lines else None
+    if not header:
+        raise NotesError("the changelog does not start with an entry header")
+    version = header.group("version")
+    if version != tag.removeprefix("v"):
+        raise NotesError("the top changelog entry is %s, not the tag %s" % (version, tag))
+    bullets = []
+    for line in lines[1:]:
+        if line.startswith(" -- "):
+            break
+        if line.startswith("  * "):
+            bullets.append(line[4:].strip())
+        elif line.startswith("    ") and line.strip() and bullets:
+            bullets[-1] += " " + line.strip()
+    if not bullets:
+        raise NotesError("the top changelog entry has no changes")
+    for bullet in bullets:
+        if "<!-- changes:" in bullet or "<!-- downloads:" in bullet:
+            raise NotesError("a change in the changelog has a marker of the notes: %r" % (bullet,))
+    return "\n".join([CHANGES_START, "## Changes in " + version, ""] + ["* " + b for b in bullets] + [CHANGES_END])
+
+
+def find_block(text, what, start, end):
+    """(start, end) offsets of the one block of `text` between the markers, or None if it has none"""
+    starts = [m.start() for m in re.finditer(re.escape(start), text)]
+    ends = [m.start() for m in re.finditer(re.escape(end), text)]
     if not starts and not ends:
         return None
     if len(starts) > 1 or len(ends) > 1:
-        raise NotesError("%s has more than one downloads marker of a kind" % what)
+        raise NotesError("%s has more than one marker of a kind: %s" % (what, start))
     if not starts or not ends:
-        raise NotesError("%s has a downloads marker without its pair" % what)
+        raise NotesError("%s has a marker without its pair: %s" % (what, start))
     if ends[0] < starts[0]:
-        raise NotesError("%s has the downloads end marker before the start marker" % what)
-    return starts[0], ends[0] + len(END)
+        raise NotesError("%s has the end marker before the start marker: %s" % (what, start))
+    return starts[0], ends[0] + len(end)
 
 
-def merge(old, block):
-    """The body `old` with the marked `block` in it"""
-    found = find_block(old, "the release body")
-    if found is None:
-        return block + "\n\n" + old
-    return old[:found[0]] + block + old[found[1]:]
+def merge(old, changes, downloads):
+    """The body `old` with the marked blocks in it: changes, downloads, the rest"""
+    what = "the release body"
+    had_downloads = find_block(old, what, START, END) is not None
+    had_changes = find_block(old, what, CHANGES_START, CHANGES_END) is not None
+    text = old
+    for block, start, end in ((downloads, START, END), (changes, CHANGES_START, CHANGES_END)):
+        found = find_block(text, what, start, end)
+        if found:
+            text = text[:found[0]] + block + text[found[1]:]
+    if not had_changes:
+        text = changes + "\n\n" + text
+    if not had_downloads:
+        stop = find_block(text, what, CHANGES_START, CHANGES_END)[1]
+        text = text[:stop] + "\n\n" + downloads + text[stop:]
+    return text
 
 
 def read_text(path):
@@ -307,6 +351,8 @@ def main(argv=None):
     parser.add_argument("--tag", required=True, help="the release's tag, e.g. v1.4.2")
     parser.add_argument("--release-json", required=True, metavar="FILE",
                         help="output of: gh release view TAG --json assets,body")
+    parser.add_argument("--changelog", required=True, metavar="FILE",
+                        help="debian/changelog: its top entry gives the changes")
     args = parser.parse_args(argv)
     try:
         release = json.loads(read_text(args.release_json))
@@ -317,7 +363,8 @@ def main(argv=None):
             body = ""
         if not isinstance(body, str):
             raise NotesError("the release JSON has a body that is not text")
-        text = merge(body, render(args.repo, args.tag, release["assets"]))
+        text = merge(body, changes_block(args.tag, read_text(args.changelog)),
+                     render(args.repo, args.tag, release["assets"]))
     except (OSError, ValueError) as exc:
         print("error: cannot read the input: %s" % exc, file=sys.stderr)
         return 1

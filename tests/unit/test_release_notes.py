@@ -40,6 +40,18 @@ PACKAGES = [
 PLASMA6 = "network-manager-gpclient-plasma-6"
 BASE = "https://github.com/%s/releases/download/%s" % (REPO, TAG)
 START, END = release_notes.START, release_notes.END
+CS, CE = release_notes.CHANGES_START, release_notes.CHANGES_END
+CHANGELOG = (
+    "network-manager-gpclient (1.4.2) unstable; urgency=medium\n\n"
+    "  * First change that runs over\n    two lines (#1)\n"
+    "  * Second change (#2)\n\n"
+    " -- Someone <a@example.org>  Fri, 13 Nov 2026 12:00:00 +0000\n\n"
+    "network-manager-gpclient (1.4.1) unstable; urgency=medium\n\n"
+    "  * An older change\n\n"
+    " -- Someone <a@example.org>  Fri, 13 Nov 2025 12:00:00 +0000\n"
+)
+CHANGES = (CS + "\n## Changes in 1.4.2\n\n* First change that runs over two lines (#1)\n"
+           "* Second change (#2)\n" + CE)
 
 
 def asset_name(package, codename, arch, version=VERSION):
@@ -70,10 +82,16 @@ def write_json(tmp_path, assets, body="", raw=None):
     return str(path)
 
 
-def run(tmp_path, assets, body="", repo=REPO, tag=TAG, raw=None):
+def write_changelog(tmp_path, text=CHANGELOG):
+    path = tmp_path / "changelog"
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def run(tmp_path, assets, body="", repo=REPO, tag=TAG, raw=None, changelog=CHANGELOG):
     result = subprocess.run(
         [sys.executable, SCRIPT, "--repo", repo, "--tag", tag, "--release-json",
-         write_json(tmp_path, assets, body, raw)],
+         write_json(tmp_path, assets, body, raw), "--changelog", write_changelog(tmp_path, changelog)],
         capture_output=True, check=False,
     )
     # decoded by hand: text=True would turn the "\r\n" of a body into "\n"
@@ -96,7 +114,7 @@ def table_rows(output):
 def test_full_matrix_rows_columns_and_links(tmp_path):
     result = run(tmp_path, full_matrix())
     assert result.returncode == 0, result.stderr
-    assert result.stdout.startswith(START + "\n## Downloads\n")
+    assert result.stdout.startswith(CHANGES + "\n\n" + START + "\n## Downloads\n")
     assert result.stdout.endswith(END + "\n\n")
     rows = table_rows(result.stdout)
     assert rows[0] == "| Ubuntu | amd64 | arm64 |"
@@ -379,7 +397,7 @@ def test_bad_repo_is_refused(tmp_path, repo):
 
 @pytest.mark.parametrize("tag", ["v1.4.2", "v1.4.2+1", "v1.4.2-rc.1", "v1", "1.4.2", "main"])
 def test_any_tag_is_accepted(tmp_path, tag):
-    result = run(tmp_path, full_matrix(), tag=tag)
+    result = run(tmp_path, full_matrix(), tag=tag, changelog=CHANGELOG.replace("(1.4.2)", "(%s)" % tag.removeprefix("v")))
     assert result.returncode == 0, result.stderr
     assert "/blob/%s/docs/APT_REPO.md" % tag.replace("+", "%2B") in result.stdout
     assert "/blob/%s/README.md" % tag.replace("+", "%2B") in result.stdout
@@ -391,21 +409,19 @@ def test_any_tag_is_accepted(tmp_path, tag):
     ("v1 <b>`id`", "v1%20%3Cb%3E%60id%60"),
     ("v1\r", "v1%0D"),
 ])
-def test_tag_with_special_characters_is_percent_encoded_in_the_link(tmp_path, tag, encoded):
-    result = run(tmp_path, full_matrix(), tag=tag)
-    assert result.returncode == 0, result.stderr
-    assert "https://github.com/%s/blob/%s/docs/APT_REPO.md" % (REPO, encoded) in result.stdout
-    assert "https://github.com/%s/blob/%s/README.md" % (REPO, encoded) in result.stdout
-    assert tag not in result.stdout
-    assert result.stdout.count(START) == 1 and result.stdout.count("\n## ") == 1
+def test_tag_with_special_characters_is_percent_encoded_in_the_link(tag, encoded):
+    out = release_notes.render(REPO, tag, full_matrix())  # a tag like this never reaches the changelog check
+    assert "https://github.com/%s/blob/%s/docs/APT_REPO.md" % (REPO, encoded) in out
+    assert "https://github.com/%s/blob/%s/README.md" % (REPO, encoded) in out
+    assert tag not in out
+    assert out.count(START) == 1 and out.count("\n## ") == 1
 
 
-def test_a_slash_in_the_tag_stays_a_slash_in_the_links(tmp_path):
-    result = run(tmp_path, full_matrix(), tag="v2.0/beta")
-    assert result.returncode == 0, result.stderr
-    assert "(https://github.com/%s/blob/v2.0/beta/docs/APT_REPO.md)" % REPO in result.stdout
-    assert "(https://github.com/%s/blob/v2.0/beta/README.md)" % REPO in result.stdout
-    assert "%2F" not in result.stdout
+def test_a_slash_in_the_tag_stays_a_slash_in_the_links():
+    out = release_notes.render(REPO, "v2.0/beta", full_matrix())
+    assert "(https://github.com/%s/blob/v2.0/beta/docs/APT_REPO.md)" % REPO in out
+    assert "(https://github.com/%s/blob/v2.0/beta/README.md)" % REPO in out
+    assert "%2F" not in out
 
 
 def test_empty_tag_is_an_error(tmp_path):
@@ -429,6 +445,7 @@ def test_parse_raises_notes_error_and_nothing_else(name):
 # Merging the table into the body of the release
 
 BLOCK = release_notes.render(REPO, TAG, full_matrix())
+TOP = CHANGES + "\n\n" + BLOCK + "\n\n"
 GENERATED = "## What's Changed\r\n* A fix by @someone in #1\n\n\n**Full Changelog**: https://x/compare/v1...v2  \n"
 
 
@@ -439,20 +456,20 @@ def body_of(tmp_path, old, assets=None):
 
 
 def test_output_is_the_block_on_top_of_a_body_without_one(tmp_path):
-    assert body_of(tmp_path, GENERATED) == BLOCK + "\n\n" + GENERATED  # the rest byte for byte
+    assert body_of(tmp_path, GENERATED) == TOP + GENERATED  # the rest byte for byte
 
 
 @pytest.mark.parametrize("raw", ['{"assets": %s}', '{"assets": %s, "body": null}', '{"assets": %s, "body": ""}'])
 def test_missing_null_and_empty_body_are_the_same(tmp_path, raw):
     result = run(tmp_path, None, raw=raw % json.dumps(full_matrix()))
     assert result.returncode == 0, result.stderr
-    assert result.stdout == BLOCK + "\n\n"
+    assert result.stdout == TOP
 
 
 def test_output_replaces_exactly_the_block_and_keeps_the_rest(tmp_path):
     old = "intro\r\n\n" + START + "\nold table\n" + END + "\n\n" + GENERATED
     out = body_of(tmp_path, old)
-    assert out == "intro\r\n\n" + BLOCK + "\n\n" + GENERATED
+    assert out == CHANGES + "\n\nintro\r\n\n" + BLOCK + "\n\n" + GENERATED
     assert "old table" not in out
 
 
@@ -465,7 +482,7 @@ def test_running_twice_gives_the_same_body(tmp_path):
 
 def test_a_table_of_an_earlier_run_is_replaced(tmp_path):
     first = body_of(tmp_path, GENERATED, assets=debs(PACKAGES[0]))
-    assert body_of(tmp_path, first) == BLOCK + "\n\n" + GENERATED
+    assert body_of(tmp_path, first) == TOP + GENERATED
 
 
 S, E = START, END
@@ -474,6 +491,12 @@ S, E = START, END
 @pytest.mark.parametrize("old", [
     "text\n" + S + "\nno end\n",                  # start without end
     "text\n" + E + "\n",                          # end without start
+    "text\n" + CS + "\nno end\n",                 # changes start without end
+    CE + "\n",                                    # changes end without start
+    CE + "\nx\n" + CS + "\n",                    # changes end before start
+    CS + "\n" + CE + "\n" + CS + "\n" + CE,      # two changes blocks
+    CS + "\n" + CS + "\n" + CE + "\n",           # two changes starts
+    CS + "\n" + CE + "\n" + CE + "\n",           # two changes ends
     E + "\nx\n" + S + "\n",                      # end before start
     S + "\na\n" + E + "\n" + S + "\nb\n" + E,   # two blocks
     S + "\n" + S + "\n" + E + "\n",              # two starts
@@ -493,14 +516,24 @@ def test_bad_release_json_is_an_error(tmp_path, raw):
 
 def test_missing_json_file_is_an_error(tmp_path):
     result = subprocess.run([sys.executable, SCRIPT, "--repo", REPO, "--tag", TAG, "--release-json",
-                             str(tmp_path / "nope")], capture_output=True, text=True, check=False)
+                             str(tmp_path / "nope"), "--changelog", write_changelog(tmp_path)],
+                            capture_output=True, text=True, check=False)
     refused(result)
 
 
+def test_missing_changelog_file_is_an_error_without_a_traceback(tmp_path):
+    result = subprocess.run([sys.executable, SCRIPT, "--repo", REPO, "--tag", TAG, "--release-json",
+                             write_json(tmp_path, full_matrix()), "--changelog", str(tmp_path / "nope")],
+                            capture_output=True, text=True, check=False)
+    refused(result)
+    assert "Traceback" not in result.stderr
+
+
 @pytest.mark.parametrize("args", [
-    ["--repo", REPO, "--tag", TAG],                                # no JSON
-    ["--repo", REPO, "--release-json", "x"],                       # no tag
-    ["--tag", TAG, "--release-json", "x"],                         # no repo
+    ["--repo", REPO, "--tag", TAG, "--release-json", "x"],         # no changelog
+    ["--repo", REPO, "--tag", TAG, "--changelog", "x"],            # no JSON
+    ["--repo", REPO, "--release-json", "x", "--changelog", "x"],   # no tag
+    ["--tag", TAG, "--release-json", "x", "--changelog", "x"],     # no repo
     ["--merge", "x", "--table", "y"],                              # the old form
     [],
 ])
@@ -508,6 +541,74 @@ def test_wrong_combination_of_options_is_refused(args):
     result = subprocess.run([sys.executable, SCRIPT] + args, capture_output=True, check=False)
     assert result.returncode == 2
     assert result.stdout == b""
+
+
+# --- The changes: the top entry of debian/changelog ----------------------------
+
+def changelog_of(*bullet_lines, header="network-manager-gpclient (1.4.2) unstable; urgency=medium"):
+    return header + "\n\n" + "\n".join(bullet_lines) + "\n\n -- X <x@example.org>  Fri, 13 Nov 2026 12:00:00 +0000\n"
+
+
+def test_changes_block_joins_the_lines_of_a_bullet_and_stops_at_the_trailer():
+    assert release_notes.changes_block(TAG, CHANGELOG) == CHANGES
+    assert "older" not in CHANGES
+
+
+def test_changes_of_the_real_changelog_match_its_top_version():
+    text = release_notes.read_text(os.path.join(REPO_ROOT, "debian", "changelog"))
+    version = re.match(r"\S+ \(([^)]+)\)", text).group(1)
+    block = release_notes.changes_block("v" + version, text)
+    assert block.startswith(CS + "\n## Changes in %s\n\n* " % version) and block.endswith(CE)
+    assert all(line.startswith("* ") for line in block.splitlines()[3:-1])
+    with pytest.raises(release_notes.NotesError):
+        release_notes.changes_block("v" + version + ".1", text)
+
+
+def test_the_order_is_changes_then_downloads_then_the_rest(tmp_path):
+    out = body_of(tmp_path, GENERATED)
+    assert out.index(CE) < out.index(START) < out.index(END) < out.index(GENERATED)
+    assert out.startswith(CS)
+
+
+def test_a_changes_block_is_replaced_in_place(tmp_path):
+    old = "intro\n\n" + CS + "\nold changes\n" + CE + "\n\n" + BLOCK + "\n\n" + GENERATED
+    out = body_of(tmp_path, old)
+    assert out == "intro\n\n" + CHANGES + "\n\n" + BLOCK + "\n\n" + GENERATED
+    assert "old changes" not in out
+
+
+def test_downloads_are_added_right_after_an_existing_changes_block(tmp_path):
+    out = body_of(tmp_path, "intro\n\n" + CS + "\nold\n" + CE + "\n\n" + GENERATED)
+    assert out == "intro\n\n" + CHANGES + "\n\n" + BLOCK + "\n\n" + GENERATED
+
+
+def test_changes_go_to_the_top_of_a_body_that_has_only_the_downloads(tmp_path):
+    out = body_of(tmp_path, "intro\n" + START + "\nold\n" + END + "\nrest")
+    assert out == CHANGES + "\n\n" + "intro\n" + BLOCK + "\nrest"
+
+
+def test_a_rerun_on_its_own_output_changes_nothing(tmp_path):
+    once = body_of(tmp_path, GENERATED)
+    assert body_of(tmp_path, once) == once
+    assert once.count(CS) == 1 and once.count(CE) == 1
+
+
+@pytest.mark.parametrize("changelog, word", [
+    (CHANGELOG.replace("(1.4.2)", "(1.4.3)"), "1.4.3"),                      # not the tag
+    (CHANGELOG.replace("(1.4.2)", "(v1.4.2)"), "v1.4.2"),
+    (changelog_of(), "no changes"),
+    (changelog_of("", "  (no bullets)"), "no changes"),
+    ("not a header\n\n  * x\n", "header"),
+    ("", "header"),
+    (changelog_of("  * x", header="network-manager-gpclient 1.4.2 unstable; urgency=medium"), "header"),
+    (" -- X\n" + CHANGELOG, "header"),
+    (changelog_of("  * a " + CS), "marker"),
+    (changelog_of("  * a", "    continues " + CE.replace("changes", "changes")), "marker"),
+    (changelog_of("  * a <!-- downloads:end -->"), "marker"),
+    (changelog_of("  * a <!-- downloads:start -->"), "marker"),
+])
+def test_a_bad_changelog_is_an_error(tmp_path, changelog, word):
+    refused(run(tmp_path, full_matrix(), changelog=changelog), word)
 
 
 # The map of Ubuntu releases must follow the build matrix and the apt repository
@@ -609,7 +710,7 @@ def test_release_notes_job_checks_out_only_the_scripts_without_credentials():
     step = job[start:job.index("\n      - name:", start + 1)]
     assert "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1" in step
     assert "persist-credentials: false" in step
-    assert "sparse-checkout: .github/scripts\n" in step
+    assert "sparse-checkout: |\n            .github/scripts\n            debian\n" in step
     assert "sparse-checkout-cone-mode" not in step.replace("sparse-checkout-cone-mode: true", "")
 
 
@@ -619,6 +720,7 @@ def test_notes_step_passes_token_repo_and_tag_by_env_and_no_expression_in_the_sc
     assert "REPO: ${{ github.repository }}" in step
     assert "TAG: ${{ github.ref_name }}" in step
     assert "${{" not in step[step.index("run: |"):]
+    assert "--changelog debian/changelog" in step
 
 
 FAKE_GH = """#!/bin/bash
@@ -641,6 +743,8 @@ def run_notes_step(tmp_path, body, assets=None, view_fails=False):
     work = tmp_path / "work"
     (work / ".github").mkdir(parents=True)
     os.symlink(os.path.join(REPO_ROOT, ".github", "scripts"), work / ".github" / "scripts")
+    (work / "debian").mkdir()
+    (work / "debian" / "changelog").write_text(CHANGELOG, encoding="utf-8")
     bindir = tmp_path / "bin"
     bindir.mkdir()
     gh = bindir / "gh"
@@ -662,11 +766,11 @@ def test_notes_step_edits_the_release_with_the_merged_body(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "release view %s --repo %s --json assets,body" % (TAG, REPO) in log
     assert "release edit %s --repo %s --notes-file" % (TAG, REPO) in log
-    assert edited.read_bytes().decode() == BLOCK + "\n\n" + GENERATED
+    assert edited.read_bytes().decode() == TOP + GENERATED
 
 
 def test_notes_step_on_a_rerun_gives_the_same_body(tmp_path):
-    first = BLOCK + "\n\n" + GENERATED
+    first = TOP + GENERATED
     result, _log, edited = run_notes_step(tmp_path, first)
     assert result.returncode == 0, result.stderr
     assert edited.read_bytes().decode() == first
@@ -684,6 +788,7 @@ def test_notes_step_fails_and_does_not_edit_when_the_release_cannot_be_read(tmp_
     ([asset(asset_name(PACKAGES[0], "noble", "amd64"), BASE + "/other.deb")], GENERATED),  # a bad url
     ([asset("README.md")], GENERATED),                                                 # no packages
     (None, GENERATED + START + "\n"),                                                  # bad markers
+    (None, GENERATED + CS + "\n"),                                                     # bad changes markers
 ])
 def test_notes_step_does_not_edit_when_the_script_fails(tmp_path, assets, body):
     result, log, edited = run_notes_step(tmp_path, body, assets=assets)
